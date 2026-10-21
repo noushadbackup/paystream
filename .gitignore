@@ -12,3 +12,4 @@ benchmarks/runs/
 .idea/
 .vscode/
 dbt/ci/*.duckdb*
+dbt/.user.yml
