@@ -16,7 +16,7 @@ DEFAULTS = {"txn_type": "P2P", "sender_id": "U1", "receiver_id": "U2", "amount_p
 
 def event(raw: dict) -> dict:
     e = {**DEFAULTS, **{k: v for k, v in raw.items() if k != "at"}}
-    e["event_time"] = int(datetime.fromisoformat(raw["at"].replace("Z", "+00:00")).timestamp() * 1000)
+    e["event_time"] = int(datetime.fromisoformat(raw["at"]).timestamp() * 1000)
     return e
 
 
