@@ -1,0 +1,19 @@
+{
+  "type": "record",
+  "name": "PaymentEvent",
+  "namespace": "io.paystream.avro",
+  "doc": "One payment request as seen by the payment gateway. v2: adds `channel`.",
+  "fields": [
+    {"name": "txn_id", "type": "string", "doc": "Idempotency key. Retries reuse it."},
+    {"name": "event_time", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When the customer initiated the payment (device clock, UTC)."},
+    {"name": "txn_type", "type": {"type": "enum", "name": "TxnType", "symbols": ["P2P", "CASH_IN", "CASH_OUT", "MERCHANT_PAY", "AIRTIME"]}},
+    {"name": "sender_id", "type": "string", "doc": "Account debited. For CASH_IN this is the agent."},
+    {"name": "receiver_id", "type": "string", "doc": "Account credited. For CASH_OUT this is the agent."},
+    {"name": "amount_paisa", "type": "long", "doc": "Amount in paisa (1 BDT = 100 paisa). Never a float."},
+    {"name": "currency", "type": "string", "default": "BDT"},
+    {"name": "device_id", "type": "string"},
+    {"name": "district", "type": "string", "doc": "Sender's district, from the device location."},
+    {"name": "status", "type": {"type": "enum", "name": "TxnStatus", "symbols": ["SUCCESS", "FAILED"]}},
+    {"name": "channel", "type": ["null", {"type": "enum", "name": "Channel", "symbols": ["APP", "USSD", "AGENT_POS"]}], "default": null, "doc": "Added in v2. Null for v1 producers."}
+  ]
+}
