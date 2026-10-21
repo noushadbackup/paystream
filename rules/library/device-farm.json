@@ -1,0 +1,16 @@
+{
+  "rule_id": "device-farm",
+  "version": 1,
+  "name": "One device, many accounts",
+  "description": "Four or more customer accounts sending money from the same handset within an hour. Genuine phone sharing in a household is usually two or three accounts; more points to rented or bought accounts operated from one device.",
+  "state": "ACTIVE",
+  "group_by": "device_id",
+  "when": [{"field": "sender_id", "op": "starts_with", "value": "U"},
+           {"field": "status", "op": "==", "value": "SUCCESS"}],
+  "aggregate": {"fn": "COUNT_DISTINCT", "field": "sender_id"},
+  "window_s": 3600,
+  "threshold": {"op": ">=", "value": 4},
+  "cooldown_s": 3600,
+  "action": "REVIEW",
+  "tags": ["mule", "device"]
+}

@@ -11,6 +11,13 @@ public class Alert {
     public long detectedAt;
     public double score;
     public String details;
+    /** Set for analyst-defined rules (rule = DYNAMIC); null for the built-in detectors. */
+    public String ruleId;
+    public Integer ruleVersion;
+    /** A shadow rule is evaluated and recorded but must not trigger any action: how a new rule is trialled. */
+    public boolean shadow;
+    /** REVIEW or DECLINE: what the decision service should do with the account. */
+    public String action = "REVIEW";
 
     public Alert() {}
 
@@ -30,6 +37,6 @@ public class Alert {
 
     @Override
     public String toString() {
-        return "Alert{" + alertId + " score=" + score + " " + details + "}";
+        return "Alert{" + alertId + (shadow ? " shadow" : "") + " score=" + score + " " + details + "}";
     }
 }

@@ -1,0 +1,29 @@
+{
+  "description": "AVG, MIN and MAX of a numeric field.",
+  "rules": [
+    {"rule_id": "avg-merchant-ticket", "version": 1, "state": "ACTIVE", "group_by": "receiver_id",
+     "when": [{"field": "txn_type", "op": "==", "value": "MERCHANT_PAY"}],
+     "aggregate": {"fn": "AVG", "field": "amount_paisa"}, "window_s": 3600,
+     "threshold": {"op": ">=", "value": 1500000}, "cooldown_s": 3600, "action": "REVIEW"},
+    {"rule_id": "max-p2p", "version": 1, "state": "ACTIVE", "group_by": "sender_id",
+     "when": [{"field": "txn_type", "op": "==", "value": "P2P"}],
+     "aggregate": {"fn": "MAX", "field": "amount_paisa"}, "window_s": 3600,
+     "threshold": {"op": ">", "value": 2400000}, "cooldown_s": 3600, "action": "REVIEW"},
+    {"rule_id": "min-p2p", "version": 1, "state": "ACTIVE", "group_by": "sender_id",
+     "when": [{"field": "txn_type", "op": "==", "value": "P2P"}],
+     "aggregate": {"fn": "MIN", "field": "amount_paisa"}, "window_s": 3600,
+     "threshold": {"op": ">=", "value": 2000000}, "cooldown_s": 3600, "action": "REVIEW"}
+  ],
+  "events": [
+    {"txn_id": "M1", "at": "2026-10-01T10:00:00Z", "txn_type": "MERCHANT_PAY", "receiver_id": "M5", "amount_paisa": 1000000},
+    {"txn_id": "M2", "at": "2026-10-01T10:05:00Z", "txn_type": "MERCHANT_PAY", "receiver_id": "M5", "amount_paisa": 1800000},
+    {"txn_id": "M3", "at": "2026-10-01T10:10:00Z", "txn_type": "MERCHANT_PAY", "receiver_id": "M5", "amount_paisa": 2000000},
+    {"txn_id": "X1", "at": "2026-10-01T10:00:00Z", "sender_id": "U3", "amount_paisa": 2400000},
+    {"txn_id": "X2", "at": "2026-10-01T10:01:00Z", "sender_id": "U3", "amount_paisa": 2500000}
+  ],
+  "expected": [
+    {"rule_id": "avg-merchant-ticket", "key": "M5", "trigger_txn_id": "M3", "observed": 1600000},
+    {"rule_id": "min-p2p", "key": "U3", "trigger_txn_id": "X1", "observed": 2400000},
+    {"rule_id": "max-p2p", "key": "U3", "trigger_txn_id": "X2", "observed": 2500000}
+  ]
+}

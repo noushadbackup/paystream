@@ -26,7 +26,15 @@ SCENARIO_RULE = {
     "account_takeover": "NEW_DEVICE_CASH_OUT",
     "mule_ring": "MULE_FAN_IN",
     "agent_float_spike": "AGENT_FLOAT_SPIKE",
+    # analyst rules from rules/library, published at startup by the rules service
+    "pin_brute_force": "failed-pin-burst",
+    "device_farm": "device-farm",
+    "structuring": "cash-in-structuring",
 }
+
+
+def rule_of(alert: dict) -> str:
+    return alert.get("rule_id") or alert["rule"]
 
 
 def pct(values: list[float], q: float) -> float | None:
@@ -90,9 +98,11 @@ def topic_records(bootstrap: str, topic: str) -> int:
 
 
 def fraud_quality(labels: list[dict], alerts: list[dict]) -> dict:
+    shadow = [a for a in alerts if a.get("shadow")]
+    alerts = [a for a in alerts if not a.get("shadow")]  # shadow rules are on trial: reported, not scored
     alerts_by = defaultdict(set)
     for a in alerts:
-        alerts_by[(a["rule"], a["account_id"])].add(a["alert_id"])
+        alerts_by[(rule_of(a), a["account_id"])].add(a["alert_id"])
     labelled_accounts = {(SCENARIO_RULE[x["scenario"]], x["account_id"]) for x in labels}
 
     recall = {}
@@ -103,11 +113,16 @@ def fraud_quality(labels: list[dict], alerts: list[dict]) -> dict:
                             "recall": round(hit / len(accounts), 4) if accounts else None}
 
     unique_alerts = {a["alert_id"]: a for a in alerts}.values()
-    true_pos = sum(1 for a in unique_alerts if (a["rule"], a["account_id"]) in labelled_accounts)
+    true_pos = sum(1 for a in unique_alerts if (rule_of(a), a["account_id"]) in labelled_accounts)
+    per_rule = defaultdict(int)
+    for a in unique_alerts:
+        per_rule[rule_of(a)] += 1
     latency = [(a["detected_at"] - a["ingest_time"]).total_seconds() * 1000 for a in unique_alerts]
     return {
         "recall": recall,
         "alerts": len(unique_alerts),
+        "alerts_per_rule": dict(sorted(per_rule.items())),
+        "shadow_alerts": len({a["alert_id"] for a in shadow}),
         "precision": round(true_pos / len(unique_alerts), 4) if unique_alerts else None,
         "alert_latency_ms": {"p50": pct(latency, 0.5), "p95": pct(latency, 0.95), "p99": pct(latency, 0.99)},
     }

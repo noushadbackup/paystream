@@ -217,6 +217,23 @@ services:
       - ./airflow/dags:/opt/airflow/dags:ro
       - ./dbt:/opt/paystream/dbt
 
+  rules-service:
+    build: { context: ., dockerfile: rules-service/Dockerfile }
+    ports: ["8090:8090"]
+    depends_on:
+      kafka: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      RULES_DB: postgresql+psycopg://paystream:paystream@postgres:5432/paystream
+      TRINO_HOST: trino
+      # Local demo identities only. In a deployment these come from the identity provider (see deploy/).
+      PAYSTREAM_RULES_TOKENS: dev-analyst=ayesha:analyst,dev-approver=rahim:approver,dev-admin=nadia:admin
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/healthz')"]
+      interval: 5s
+      retries: 24
+
   ops-console:
     build: { context: dashboard }
     ports: ["8501:8501"]

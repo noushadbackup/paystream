@@ -2,16 +2,21 @@ package io.paystream.flink;
 
 import io.paystream.flink.model.Alert;
 import io.paystream.flink.model.Envelope;
+import io.paystream.flink.model.Label;
 import io.paystream.flink.pipeline.PaymentsPipeline;
 import io.paystream.flink.rules.RuleConfig;
+import io.paystream.flink.rules.dynamic.RuleUpdates;
 import io.paystream.flink.serde.AlertSerializer;
 import io.paystream.flink.serde.DeadLetterSerializer;
 import io.paystream.flink.serde.HttpSchemaRegistry;
+import io.paystream.flink.serde.LabelDeserializer;
 import io.paystream.flink.serde.PaymentEventDeserializer;
 import io.paystream.flink.sink.IcebergTables;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.Map;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
@@ -67,8 +72,22 @@ public final class PaymentsJob {
                 .fromSource(source, PaymentsPipeline.watermarks(), "kafka-payments")
                 .uid("kafka-payments");
 
+        // Analyst rules: a compacted topic keyed by rule_id. Read from the start on a fresh job; after a
+        // restore the broadcast state already holds them and the source resumes from its checkpoint.
+        KafkaSource<String> rulesSource = KafkaSource.<String>builder()
+                .setBootstrapServers(bootstrap)
+                .setTopics(p.get("rulesTopic", "fraud.rules"))
+                .setGroupId(p.get("groupId", "paystream-flink") + "-rules")
+                .setStartingOffsets(OffsetsInitializer.earliest())
+                .setValueOnlyDeserializer(new SimpleStringSchema())
+                .build();
+        DataStream<String> ruleUpdates = env
+                .fromSource(rulesSource, RuleUpdates.watermarks(), "kafka-rules")
+                .setParallelism(1)
+                .uid("kafka-rules");
+
         PaymentsPipeline.Outputs out = PaymentsPipeline.build(envelopes, RuleConfig.from(p),
-                Duration.ofMinutes(p.getLong("dedupTtlMin", 120)));
+                Duration.ofMinutes(p.getLong("dedupTtlMin", 120)), ruleUpdates);
 
         out.alerts().sinkTo(KafkaSink.<Alert>builder()
                         .setBootstrapServers(bootstrap)
@@ -96,6 +115,18 @@ public final class PaymentsJob {
                 "client.region", "us-east-1"));
         StreamStatementSet set = tEnv.createStatementSet();
         IcebergTables.insertAll(tEnv, set, out);
+
+        // Ground truth (simulator labels today, analyst case decisions later) lands next to the alerts,
+        // so a backtest can report precision. It never feeds the rules.
+        KafkaSource<Label> labelsSource = KafkaSource.<Label>builder()
+                .setBootstrapServers(bootstrap)
+                .setTopics(p.get("labelsTopic", "fraud.labels"))
+                .setGroupId(p.get("groupId", "paystream-flink") + "-labels")
+                .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
+                .setDeserializer(new LabelDeserializer(registry))
+                .build();
+        IcebergTables.insertLabels(tEnv, set, env
+                .fromSource(labelsSource, WatermarkStrategy.noWatermarks(), "kafka-labels").uid("kafka-labels"));
         set.attachAsDataStream();
 
         env.execute("paystream-payments");

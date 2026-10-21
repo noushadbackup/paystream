@@ -1,0 +1,32 @@
+{
+  "description": "SHADOW rules fire but are flagged; DISABLED rules never fire. in, not_in and > on several rules at once, each with its own grouping.",
+  "rules": [
+    {"rule_id": "agent-high-value-cash-in", "version": 1, "state": "SHADOW", "group_by": "receiver_id",
+     "when": [{"field": "txn_type", "op": "in", "value": ["CASH_IN"]},
+              {"field": "amount_paisa", "op": ">", "value": 2000000}],
+     "aggregate": {"fn": "COUNT"}, "window_s": 86400,
+     "threshold": {"op": ">=", "value": 2}, "cooldown_s": 0, "action": "REVIEW"},
+    {"rule_id": "outside-dhaka-ussd", "version": 4, "state": "ACTIVE", "group_by": "district",
+     "when": [{"field": "district", "op": "not_in", "value": ["Dhaka"]},
+              {"field": "channel", "op": "==", "value": "USSD"}],
+     "aggregate": {"fn": "COUNT"}, "window_s": 60,
+     "threshold": {"op": ">", "value": 2}, "cooldown_s": 0, "action": "REVIEW"},
+    {"rule_id": "retired-rule", "version": 9, "state": "DISABLED", "group_by": "sender_id",
+     "when": [], "aggregate": {"fn": "COUNT"}, "window_s": 60,
+     "threshold": {"op": ">=", "value": 1}, "cooldown_s": 0, "action": "DECLINE"}
+  ],
+  "events": [
+    {"txn_id": "C1", "at": "2026-10-01T10:00:00Z", "txn_type": "CASH_IN", "sender_id": "A1", "receiver_id": "U7", "amount_paisa": 2500000},
+    {"txn_id": "C2", "at": "2026-10-01T10:30:00Z", "txn_type": "CASH_IN", "sender_id": "A2", "receiver_id": "U7", "amount_paisa": 2000000},
+    {"txn_id": "C3", "at": "2026-10-01T15:00:00Z", "txn_type": "CASH_IN", "sender_id": "A1", "receiver_id": "U7", "amount_paisa": 2100000},
+    {"txn_id": "S1", "at": "2026-10-01T10:00:00Z", "district": "Sylhet", "channel": "USSD"},
+    {"txn_id": "S2", "at": "2026-10-01T10:00:10Z", "district": "Sylhet", "channel": "USSD"},
+    {"txn_id": "S3", "at": "2026-10-01T10:00:20Z", "district": "Dhaka", "channel": "USSD"},
+    {"txn_id": "S4", "at": "2026-10-01T10:00:30Z", "district": "Sylhet", "channel": "APP"},
+    {"txn_id": "S5", "at": "2026-10-01T10:00:40Z", "district": "Sylhet", "channel": "USSD"}
+  ],
+  "expected": [
+    {"rule_id": "agent-high-value-cash-in", "key": "U7", "trigger_txn_id": "C3", "observed": 2, "shadow": true},
+    {"rule_id": "outside-dhaka-ussd", "key": "Sylhet", "trigger_txn_id": "S5", "observed": 3}
+  ]
+}

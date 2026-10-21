@@ -36,3 +36,15 @@ def test_v2_reader_reads_v1_data_with_null_channel():
     fastavro.writer(buf, v1, events)
     buf.seek(0)
     assert all(r["channel"] is None for r in fastavro.reader(buf, reader_schema=v2))
+
+
+def test_alert_v2_reader_reads_v1_alerts():
+    """Alerts v2 adds analyst-rule fields; alerts written before it still read, as built-in, live rules."""
+    v1, v2 = load("history/fraud_alert.v1.avsc"), load("fraud_alert.avsc")
+    alert = {"alert_id": "VELOCITY:U1:T1", "rule": "VELOCITY", "account_id": "U1", "trigger_txn_id": "T1",
+             "event_time": 0, "ingest_time": 0, "detected_at": 5, "score": 1.2, "details": "6 outgoing"}
+    buf = io.BytesIO()
+    fastavro.writer(buf, v1, [alert])
+    buf.seek(0)
+    [r] = list(fastavro.reader(buf, reader_schema=v2))
+    assert r["rule"] == "VELOCITY" and r["rule_id"] is None and r["shadow"] is False and r["action"] == "REVIEW"

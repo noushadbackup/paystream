@@ -51,6 +51,10 @@ public class AlertSerializer implements KafkaRecordSerializationSchema<Alert> {
                 .setDetectedAt(Instant.ofEpochMilli(a.detectedAt))
                 .setScore(a.score)
                 .setDetails(a.details)
+                .setRuleId(a.ruleId)
+                .setRuleVersion(a.ruleVersion)
+                .setShadow(a.shadow)
+                .setAction(a.action)
                 .build();
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream(256);

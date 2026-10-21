@@ -1,0 +1,17 @@
+{
+  "rule_id": "cash-in-structuring",
+  "version": 1,
+  "name": "High-value cash-in structuring",
+  "description": "Three or more cash-ins of 20,000 BDT or more into one account within a day. Splitting a large amount across agents keeps each deposit small; together they are a candidate for a suspicious transaction report.",
+  "state": "ACTIVE",
+  "group_by": "receiver_id",
+  "when": [{"field": "txn_type", "op": "==", "value": "CASH_IN"},
+           {"field": "amount_paisa", "op": ">=", "value": 2000000},
+           {"field": "status", "op": "==", "value": "SUCCESS"}],
+  "aggregate": {"fn": "COUNT"},
+  "window_s": 86400,
+  "threshold": {"op": ">=", "value": 3},
+  "cooldown_s": 86400,
+  "action": "REVIEW",
+  "tags": ["aml", "structuring"]
+}

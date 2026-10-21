@@ -17,9 +17,12 @@
           "VELOCITY",
           "MULE_FAN_IN",
           "NEW_DEVICE_CASH_OUT",
-          "AGENT_FLOAT_SPIKE"
-        ]
-      }
+          "AGENT_FLOAT_SPIKE",
+          "DYNAMIC"
+        ],
+        "default": "DYNAMIC"
+      },
+      "doc": "Built-in detector, or DYNAMIC for an analyst rule (see rule_id). Unknown future symbols read as DYNAMIC."
     },
     {
       "name": "account_id",
@@ -61,6 +64,36 @@
     {
       "name": "details",
       "type": "string"
+    },
+    {
+      "name": "rule_id",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "Analyst rule id when rule = DYNAMIC (v2)."
+    },
+    {
+      "name": "rule_version",
+      "type": [
+        "null",
+        "int"
+      ],
+      "default": null,
+      "doc": "Version of the analyst rule that fired (v2)."
+    },
+    {
+      "name": "shadow",
+      "type": "boolean",
+      "default": false,
+      "doc": "Shadow rules are recorded but must not trigger actions (v2)."
+    },
+    {
+      "name": "action",
+      "type": "string",
+      "default": "REVIEW",
+      "doc": "REVIEW or DECLINE: what the decision service should do (v2)."
     }
   ]
 }

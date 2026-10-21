@@ -51,6 +51,10 @@ class Config:
         "account_takeover": 2.0,
         "mule_ring": 0.5,
         "agent_float_spike": 0.2,
+        # caught by analyst rules (rules/library), not by the built-in detectors
+        "pin_brute_force": 1.0,
+        "device_farm": 0.3,
+        "structuring": 0.3,
     })
 
 
@@ -61,7 +65,7 @@ class Emitted:
     event: dict
     scenario: str | None = None
     is_duplicate: bool = False
-    subject: str | None = None  # the account a fraud scenario is about: who should be flagged
+    subject: str | None = None  # the account (or device) a fraud scenario is about: who should be flagged
 
 
 class Simulator:
@@ -237,3 +241,46 @@ class Simulator:
             amount = rng.randint(5_000, 15_000) * BDT
             self._fraud("agent_float_spike", agent,
                         self._event(t, "CASH_OUT", user, agent, amount, self.pop.device_of(user), district, "SUCCESS"))
+
+    def _scenario_pin_brute_force(self, t0: int) -> None:
+        """A stolen phone or SIM: wrong PINs in quick succession, then a cash-out once one works."""
+        rng = self.rng
+        u = self.pop.pick_user(rng)
+        user, district = self.pop.users[u], self.pop.user_district[u]
+        device = f"X{rng.getrandbits(40):010x}"
+        agent = self.pop.pick_agent(rng, district)
+        t = t0
+        for _ in range(rng.randint(5, 9)):
+            t += rng.randint(3_000, 20_000)
+            self._fraud("pin_brute_force", user, self._event(t, "CASH_OUT", user, agent, rng.randint(5_000, 20_000) * BDT,
+                                                             device, district, "FAILED"))
+        if rng.random() < 0.6:
+            self._fraud("pin_brute_force", user, self._event(t + rng.randint(5_000, 30_000), "CASH_OUT", user, agent,
+                                                             rng.randint(5_000, 20_000) * BDT, device, district,
+                                                             "SUCCESS"))
+
+    def _scenario_device_farm(self, t0: int) -> None:
+        """One handset logs into many accounts (bought or rented) and sweeps them into a collector."""
+        rng = self.rng
+        device = f"F{rng.getrandbits(40):010x}"
+        c = self.pop.pick_user(rng)
+        collector, district = self.pop.users[c], self.pop.user_district[c]
+        t = t0
+        for _ in range(rng.randint(4, 8)):
+            t += rng.randint(60_000, 400_000)
+            account = self.pop.users[rng.randrange(len(self.pop.users))]
+            self._fraud("device_farm", device, self._event(t, "P2P", account, collector,
+                                                           rng.randint(1_000, 8_000) * BDT, device, district,
+                                                           "SUCCESS"))
+
+    def _scenario_structuring(self, t0: int) -> None:
+        """Large cash split into several high-value cash-ins at different agents to avoid one big deposit."""
+        rng = self.rng
+        u = self.pop.pick_user(rng)
+        user, district = self.pop.users[u], self.pop.user_district[u]
+        t = t0
+        for _ in range(rng.randint(3, 5)):
+            t += rng.randint(5 * 60_000, 90 * 60_000)
+            agent = self.pop.pick_agent(rng, district)
+            self._fraud("structuring", user, self._event(t, "CASH_IN", agent, user, rng.randint(20_000, 24_900) * BDT,
+                                                         f"POS{agent[1:]}", district, "SUCCESS"))

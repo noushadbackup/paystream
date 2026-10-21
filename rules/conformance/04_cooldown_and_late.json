@@ -1,0 +1,25 @@
+{
+  "description": "A late event is evaluated at the time it happened, so it can complete a burst. Cooldown is in event time: P5 is suppressed, Q4 fires once 900 s have passed since P4.",
+  "rules": [
+    {"rule_id": "failed-pin-burst", "version": 1, "state": "ACTIVE", "group_by": "sender_id",
+     "when": [{"field": "status", "op": "==", "value": "FAILED"}],
+     "aggregate": {"fn": "COUNT"}, "window_s": 600,
+     "threshold": {"op": ">=", "value": 4}, "cooldown_s": 900, "action": "DECLINE"}
+  ],
+  "events": [
+    {"txn_id": "P1", "at": "2026-10-01T10:00:00Z", "status": "FAILED"},
+    {"txn_id": "P2", "at": "2026-10-01T10:01:00Z", "status": "FAILED"},
+    {"txn_id": "P3", "at": "2026-10-01T10:02:00Z", "status": "FAILED"},
+    {"txn_id": "OK", "at": "2026-10-01T10:06:40Z", "status": "SUCCESS"},
+    {"txn_id": "P4", "at": "2026-10-01T10:03:00Z", "status": "FAILED"},
+    {"txn_id": "P5", "at": "2026-10-01T10:04:00Z", "status": "FAILED"},
+    {"txn_id": "Q1", "at": "2026-10-01T10:12:00Z", "status": "FAILED"},
+    {"txn_id": "Q2", "at": "2026-10-01T10:13:00Z", "status": "FAILED"},
+    {"txn_id": "Q3", "at": "2026-10-01T10:14:00Z", "status": "FAILED"},
+    {"txn_id": "Q4", "at": "2026-10-01T10:18:00Z", "status": "FAILED"}
+  ],
+  "expected": [
+    {"rule_id": "failed-pin-burst", "key": "U1", "trigger_txn_id": "P4", "observed": 4},
+    {"rule_id": "failed-pin-burst", "key": "U1", "trigger_txn_id": "Q4", "observed": 4}
+  ]
+}

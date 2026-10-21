@@ -1,10 +1,20 @@
 package io.paystream.flink.sink;
 
+import io.paystream.flink.model.Label;
 import io.paystream.flink.pipeline.PaymentsPipeline;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.bridge.java.StreamStatementSet;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.UpdateSchema;
+import org.apache.iceberg.catalog.Catalog;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.flink.FlinkCatalog;
+import org.apache.iceberg.types.Type;
+import org.apache.iceberg.types.Types;
 
 /**
  * Lakehouse sinks. Tables are declared in SQL so the layout is readable in one place.
@@ -39,7 +49,12 @@ public final class IcebergTables {
         tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.silver.fraud_alerts ("
                 + "alert_id STRING, rule STRING, account_id STRING, trigger_txn_id STRING,"
                 + " event_time TIMESTAMP_LTZ(3), ingest_time TIMESTAMP_LTZ(3), detected_at TIMESTAMP_LTZ(3),"
-                + " score DOUBLE, details STRING, event_date DATE) PARTITIONED BY (event_date)" + v2);
+                + " score DOUBLE, details STRING, rule_id STRING, rule_version INT, shadow BOOLEAN, action STRING,"
+                + " event_date DATE) PARTITIONED BY (event_date)" + v2);
+        addMissingColumns(tEnv, "silver", "fraud_alerts", ALERT_COLUMNS_V2);
+        tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.silver.fraud_labels ("
+                + "txn_id STRING, scenario STRING, account_id STRING, labelled_at TIMESTAMP_LTZ(3), label_date DATE"
+                + ") PARTITIONED BY (label_date)" + v2);
         tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.gold.kpi_minute ("
                 + "window_start TIMESTAMP_LTZ(3), txn_type STRING, txn_count BIGINT, success_count BIGINT,"
                 + " failed_count BIGINT, success_amount_paisa BIGINT, event_date DATE)"
@@ -67,10 +82,47 @@ public final class IcebergTables {
                 + ", kafkaPartition, kafkaOffset, " + EVENT_DATE + " FROM v_bronze");
         set.addInsertSql("INSERT INTO lake.silver.payments SELECT " + PAYMENT_SELECT + ", " + EVENT_DATE + " FROM v_silver");
         set.addInsertSql("INSERT INTO lake.silver.late_payments SELECT " + PAYMENT_SELECT + ", " + EVENT_DATE + " FROM v_late");
-        set.addInsertSql("INSERT INTO lake.silver.fraud_alerts SELECT alertId, rule, accountId, triggerTxnId,"
+        set.addInsertSql("INSERT INTO lake.silver.fraud_alerts (alert_id, rule, account_id, trigger_txn_id,"
+                + " event_time, ingest_time, detected_at, score, details, rule_id, rule_version, shadow, action, event_date)"
+                + " SELECT alertId, rule, accountId, triggerTxnId,"
                 + " TO_TIMESTAMP_LTZ(eventTime, 3), TO_TIMESTAMP_LTZ(ingestTime, 3), TO_TIMESTAMP_LTZ(detectedAt, 3),"
-                + " score, details, " + EVENT_DATE + " FROM v_alerts");
+                + " score, details, ruleId, ruleVersion, shadow, action, " + EVENT_DATE + " FROM v_alerts");
         set.addInsertSql("INSERT INTO lake.gold.kpi_minute SELECT TO_TIMESTAMP_LTZ(windowStart, 3), txnType, txnCount,"
                 + " successCount, failedCount, successAmountPaisa, CAST(TO_TIMESTAMP_LTZ(windowStart, 3) AS DATE) FROM v_kpis");
+    }
+
+    /** Labels go in through the same statement set, so they commit on the same checkpoints. */
+    public static void insertLabels(StreamTableEnvironment tEnv, StreamStatementSet set, DataStream<Label> labels) {
+        tEnv.createTemporaryView("v_labels", labels);
+        set.addInsertSql("INSERT INTO lake.silver.fraud_labels SELECT txnId, scenario, accountId,"
+                + " TO_TIMESTAMP_LTZ(labelledAt, 3), CAST(TO_TIMESTAMP_LTZ(labelledAt, 3) AS DATE) FROM v_labels");
+    }
+
+    /** Columns added to silver.fraud_alerts in v2 (analyst rules), for tables created before them. */
+    private static final Map<String, Type> ALERT_COLUMNS_V2 = new LinkedHashMap<>();
+
+    static {
+        ALERT_COLUMNS_V2.put("rule_id", Types.StringType.get());
+        ALERT_COLUMNS_V2.put("rule_version", Types.IntegerType.get());
+        ALERT_COLUMNS_V2.put("shadow", Types.BooleanType.get());
+        ALERT_COLUMNS_V2.put("action", Types.StringType.get());
+    }
+
+    /**
+     * Additive schema migration. Iceberg tracks columns by id, so adding optional columns is a
+     * metadata-only commit: existing data files are not rewritten and old rows read the new columns as null.
+     */
+    static void addMissingColumns(StreamTableEnvironment tEnv, String db, String table, Map<String, Type> columns) {
+        Catalog catalog = ((FlinkCatalog) tEnv.getCatalog(CATALOG).orElseThrow()).catalog();
+        Table t = catalog.loadTable(TableIdentifier.of(db, table));
+        UpdateSchema update = t.updateSchema();
+        boolean changed = false;
+        for (Map.Entry<String, Type> c : columns.entrySet()) {
+            if (t.schema().findField(c.getKey()) == null) {
+                update.addColumn(c.getKey(), c.getValue());
+                changed = true;
+            }
+        }
+        if (changed) update.commit();
     }
 }

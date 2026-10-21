@@ -1,0 +1,17 @@
+{
+  "rule_id": "night-cash-out-drain",
+  "version": 1,
+  "name": "Night-time cash-out drain (trial)",
+  "description": "40,000 BDT or more cashed out by one account between midnight and 5 am Dhaka time within an hour. Running in shadow to measure how often it fires on genuine customers before it is allowed to act.",
+  "state": "SHADOW",
+  "group_by": "sender_id",
+  "when": [{"field": "txn_type", "op": "==", "value": "CASH_OUT"},
+           {"field": "hour_dhaka", "op": "<", "value": 5},
+           {"field": "status", "op": "==", "value": "SUCCESS"}],
+  "aggregate": {"fn": "SUM", "field": "amount_paisa"},
+  "window_s": 3600,
+  "threshold": {"op": ">=", "value": 4000000},
+  "cooldown_s": 3600,
+  "action": "DECLINE",
+  "tags": ["account-takeover"]
+}

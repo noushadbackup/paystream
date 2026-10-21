@@ -12,8 +12,8 @@ import streamlit as st
 
 import queries as q
 
-RULES = ["VELOCITY", "MULE_FAN_IN", "NEW_DEVICE_CASH_OUT", "AGENT_FLOAT_SPIKE"]
-RULE_COLORS = alt.Scale(domain=RULES, range=["#4C78A8", "#E45756", "#F58518", "#72B7B2"])
+BUILT_IN = ["VELOCITY", "MULE_FAN_IN", "NEW_DEVICE_CASH_OUT", "AGENT_FLOAT_SPIKE"]
+PALETTE = ["#4C78A8", "#E45756", "#F58518", "#72B7B2", "#54A24B", "#B279A2", "#9D755D", "#EECA3B", "#FF9DA6"]
 
 def taka(bdt: float) -> str:
     """Bangladeshi convention: lakh (1e5) and crore (1e7)."""
@@ -33,6 +33,8 @@ def backend() -> q.Backend:
 
 
 b = backend()
+RULES = BUILT_IN + [r for r in q.rule_names(b) if r not in BUILT_IN]
+RULE_COLORS = alt.Scale(domain=RULES, range=PALETTE[: len(RULES)])
 
 with st.sidebar:
     st.header("PayStream")
@@ -100,31 +102,58 @@ def live() -> None:
                 "rule": "Rule",
                 "account_id": "Account",
                 "score": st.column_config.ProgressColumn("Score", min_value=1.0, max_value=3.0, format="%.2f"),
+                "action": "Action",
                 "details": "Why",
                 "trigger_txn_id": "Trigger txn",
             },
         )
 
 
-live()
+live_tab, rules_tab = st.tabs(["Live", "Rules"])
+with live_tab:
+    live()
+    st.divider()
+    recon_col, agent_col = st.columns(2)
+    with recon_col:
+        st.subheader("Stream vs ledger reconciliation")
+        st.caption("Every successful gateway payment must be posted in the ledger once, with the same amount.")
+        recon = q.reconciliation(b)
+        st.dataframe(
+            recon.style.map(lambda s: "color: #2e7d32; font-weight: 600" if s == "MATCHED"
+                            else "color: #c62828; font-weight: 600", subset=["status"]),
+            hide_index=True,
+            column_config={"stream_bdt": st.column_config.NumberColumn("Stream ৳", format="%,.2f"),
+                           "ledger_bdt": st.column_config.NumberColumn("Ledger ৳", format="%,.2f")},
+        )
+    with agent_col:
+        st.subheader("Agents running low on float")
+        st.caption("Net e-money change today: cash-in spends float, cash-out earns it back.")
+        st.dataframe(q.agent_float(b), hide_index=True)
 
-st.divider()
-recon_col, agent_col = st.columns(2)
-with recon_col:
-    st.subheader("Stream vs ledger reconciliation")
-    st.caption("Every successful gateway payment must be posted in the ledger once, with the same amount.")
-    recon = q.reconciliation(b)
+with rules_tab:
+    st.subheader("Rule performance")
+    st.caption("Every rule over all data in the lake. Precision is the share of a rule's alerts that land on accounts "
+               "with a fraud label. Shadow rules run on live traffic without acting, so their numbers are known before "
+               "anyone lets them decline a payment.")
+    perf = q.rule_performance(b)
     st.dataframe(
-        recon.style.map(lambda s: "color: #2e7d32; font-weight: 600" if s == "MATCHED"
-                        else "color: #c62828; font-weight: 600", subset=["status"]),
+        perf,
         hide_index=True,
-        column_config={"stream_bdt": st.column_config.NumberColumn("Stream ৳", format="%,.2f"),
-                       "ledger_bdt": st.column_config.NumberColumn("Ledger ৳", format="%,.2f")},
+        column_config={
+            "shadow": st.column_config.CheckboxColumn("Shadow"),
+            "precision_vs_labels": st.column_config.ProgressColumn("Precision", min_value=0.0, max_value=1.0,
+                                                                   format="%.2f"),
+            "worst_day_p95_ms": st.column_config.NumberColumn("Worst day p95 (ms)", format="%.0f"),
+        },
     )
-with agent_col:
-    st.subheader("Agents running low on float")
-    st.caption("Net e-money change today: cash-in spends float, cash-out earns it back.")
-    st.dataframe(q.agent_float(b), hide_index=True)
+    st.subheader("Shadow alerts")
+    shadow = q.shadow_alerts(b, q.anchor(b))
+    if shadow.empty:
+        st.info("No shadow rule has fired in this data. A rule in shadow alerts here instead of in the feed.")
+    else:
+        st.dataframe(shadow, hide_index=True)
+    st.caption("Rules are written, backtested and approved in the rules service (maker-checker, audit log): "
+               "`POST /rules`, `/backtest`, `/submit`, `/approve`. Approved versions reach Flink in seconds.")
 
 if lookup:
     st.divider()

@@ -55,6 +55,12 @@ def backend_from_env() -> Backend:
     return TrinoBackend(os.environ.get("TRINO_HOST", "localhost"), int(os.environ.get("TRINO_PORT", "8080")))
 
 
+# Built-in detectors are named by `rule`; analyst rules have rule = 'DYNAMIC' and are named by rule_id.
+RULE = "COALESCE(rule_id, rule)"
+# Shadow rules are on trial: their alerts are measured on the Rules tab, never shown as work to do.
+LIVE = "NOT COALESCE(shadow, false)"
+
+
 def anchor(b: Backend) -> pd.Timestamp:
     """The newest event time in the data: 'now' for every window below."""
     return pd.Timestamp(b.df("SELECT max(event_time) AS t FROM silver.payments")["t"].iloc[0])
@@ -73,9 +79,9 @@ def headline(b: Backend, now: pd.Timestamp, minutes: int) -> dict:
         (now - pd.Timedelta(minutes=minutes), now),
     ).iloc[0]
     a = b.df(
-        """
+        f"""
         SELECT ingest_time, detected_at FROM silver.fraud_alerts
-        WHERE event_time > ? AND event_time <= ?
+        WHERE event_time > ? AND event_time <= ? AND {LIVE}
         """,
         (now - pd.Timedelta(minutes=minutes), now),
     )
@@ -92,12 +98,13 @@ def headline(b: Backend, now: pd.Timestamp, minutes: int) -> dict:
 
 
 def alert_feed(b: Backend, now: pd.Timestamp, rules: list[str], limit: int = 50) -> pd.DataFrame:
-    rule_filter = " AND rule IN (" + ",".join("?" * len(rules)) + ")" if rules else ""
+    rule_filter = f" AND {RULE} IN (" + ",".join("?" * len(rules)) + ")" if rules else ""
     return b.df(
         f"""
-        SELECT detected_at, rule, account_id, score, details, trigger_txn_id
+        SELECT detected_at, {RULE} AS rule, account_id, score, COALESCE(action, 'REVIEW') AS action, details,
+               trigger_txn_id
         FROM silver.fraud_alerts
-        WHERE event_time <= ?{rule_filter}
+        WHERE event_time <= ? AND {LIVE}{rule_filter}
         ORDER BY event_time DESC
         LIMIT {int(limit)}
         """,
@@ -107,10 +114,10 @@ def alert_feed(b: Backend, now: pd.Timestamp, rules: list[str], limit: int = 50)
 
 def alerts_per_minute(b: Backend, now: pd.Timestamp, minutes: int) -> pd.DataFrame:
     return b.df(
-        """
-        SELECT date_trunc('minute', event_time) AS minute, rule, count(*) AS alerts
+        f"""
+        SELECT date_trunc('minute', event_time) AS minute, {RULE} AS rule, count(*) AS alerts
         FROM silver.fraud_alerts
-        WHERE event_time > ? AND event_time <= ?
+        WHERE event_time > ? AND event_time <= ? AND {LIVE}
         GROUP BY 1, 2
         ORDER BY 1
         """,
@@ -168,7 +175,40 @@ def account(b: Backend, account_id: str, now: pd.Timestamp) -> tuple[pd.DataFram
         (account_id, account_id, now),
     )
     alerts = b.df(
-        "SELECT detected_at, rule, score, details FROM silver.fraud_alerts WHERE account_id = ? ORDER BY detected_at DESC",
+        f"SELECT detected_at, {RULE} AS rule, score, details FROM silver.fraud_alerts"
+        f" WHERE account_id = ? AND {LIVE} ORDER BY detected_at DESC",
         (account_id,),
     )
     return payments, alerts
+
+
+def rule_names(b: Backend) -> list[str]:
+    return b.df(f"SELECT DISTINCT {RULE} AS rule FROM silver.fraud_alerts ORDER BY 1")["rule"].tolist()
+
+
+def rule_performance(b: Backend) -> pd.DataFrame:
+    """Per rule over every day in the lake: volume, reach and precision against the labels."""
+    return b.df(
+        """
+        SELECT rule_name AS rule, shadow, max(rule_version) AS version, sum(alerts) AS alerts,
+               sum(keys_flagged) AS keys_flagged,
+               CAST(sum(alerts_on_labelled) AS double) / sum(alerts) AS precision_vs_labels,
+               max(detection_p95_ms) AS worst_day_p95_ms
+        FROM gold.fct_rule_performance_daily
+        GROUP BY 1, 2
+        ORDER BY shadow, alerts DESC
+        """
+    )
+
+
+def shadow_alerts(b: Backend, now: pd.Timestamp, limit: int = 50) -> pd.DataFrame:
+    return b.df(
+        f"""
+        SELECT detected_at, rule_id AS rule, rule_version AS version, account_id, action AS would_have, details
+        FROM silver.fraud_alerts
+        WHERE event_time <= ? AND COALESCE(shadow, false)
+        ORDER BY event_time DESC
+        LIMIT {int(limit)}
+        """,
+        (now,),
+    )

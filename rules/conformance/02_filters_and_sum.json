@@ -1,0 +1,23 @@
+{
+  "description": "SUM over filtered events only. hour_dhaka is UTC+6: 18:00Z is midnight in Dhaka.",
+  "rules": [
+    {"rule_id": "night-cash-out-drain", "version": 2, "state": "ACTIVE", "group_by": "sender_id",
+     "when": [{"field": "txn_type", "op": "==", "value": "CASH_OUT"},
+              {"field": "hour_dhaka", "op": "<", "value": 5},
+              {"field": "status", "op": "==", "value": "SUCCESS"}],
+     "aggregate": {"fn": "SUM", "field": "amount_paisa"}, "window_s": 3600,
+     "threshold": {"op": ">=", "value": 4000000}, "cooldown_s": 3600, "action": "DECLINE"}
+  ],
+  "events": [
+    {"txn_id": "D1", "at": "2026-10-01T12:00:00Z", "txn_type": "CASH_OUT", "amount_paisa": 3000000},
+    {"txn_id": "N1", "at": "2026-10-01T18:10:00Z", "txn_type": "CASH_OUT", "amount_paisa": 2000000},
+    {"txn_id": "N2", "at": "2026-10-01T18:20:00Z", "txn_type": "P2P", "amount_paisa": 2400000},
+    {"txn_id": "N3", "at": "2026-10-01T18:25:00Z", "txn_type": "CASH_OUT", "amount_paisa": 1500000, "status": "FAILED"},
+    {"txn_id": "N4", "at": "2026-10-01T18:30:00Z", "txn_type": "CASH_OUT", "amount_paisa": 1900000},
+    {"txn_id": "N5", "at": "2026-10-01T18:40:00Z", "txn_type": "CASH_OUT", "amount_paisa": 100000},
+    {"txn_id": "N6", "at": "2026-10-01T18:50:00Z", "txn_type": "CASH_OUT", "amount_paisa": 500000}
+  ],
+  "expected": [
+    {"rule_id": "night-cash-out-drain", "key": "U1", "trigger_txn_id": "N5", "observed": 4000000}
+  ]
+}

@@ -1,0 +1,30 @@
+[project]
+name = "paystream-rules"
+version = "0.1.0"
+description = "PayStream rules service: versioned analyst rules, maker-checker approval, audit log, backtesting"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0",
+  "jsonschema>=4.23",
+]
+
+[project.optional-dependencies]
+kafka = ["confluent-kafka>=2.5"]
+postgres = ["psycopg[binary]>=3.2"]
+lake = ["duckdb>=1.1", "trino>=0.330"]
+dev = ["pytest>=8", "httpx>=0.27", "duckdb>=1.1"]
+
+[project.scripts]
+paystream-rules = "paystream_rules.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

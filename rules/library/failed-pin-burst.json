@@ -1,0 +1,15 @@
+{
+  "rule_id": "failed-pin-burst",
+  "version": 1,
+  "name": "Failed PIN burst",
+  "description": "Five or more failed payments from one account in ten minutes: someone is guessing the PIN on a stolen phone or a swapped SIM. Declining the next attempt costs a genuine user one retry; letting it through can cost their balance.",
+  "state": "ACTIVE",
+  "group_by": "sender_id",
+  "when": [{"field": "status", "op": "==", "value": "FAILED"}],
+  "aggregate": {"fn": "COUNT"},
+  "window_s": 600,
+  "threshold": {"op": ">=", "value": 5},
+  "cooldown_s": 900,
+  "action": "DECLINE",
+  "tags": ["account-takeover"]
+}

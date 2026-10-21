@@ -1,0 +1,66 @@
+{
+  "type": "record",
+  "name": "FraudAlert",
+  "namespace": "io.paystream.avro",
+  "fields": [
+    {
+      "name": "alert_id",
+      "type": "string",
+      "doc": "Deterministic: rule + key + trigger txn, so replays do not create new alerts."
+    },
+    {
+      "name": "rule",
+      "type": {
+        "type": "enum",
+        "name": "FraudRule",
+        "symbols": [
+          "VELOCITY",
+          "MULE_FAN_IN",
+          "NEW_DEVICE_CASH_OUT",
+          "AGENT_FLOAT_SPIKE"
+        ]
+      }
+    },
+    {
+      "name": "account_id",
+      "type": "string"
+    },
+    {
+      "name": "trigger_txn_id",
+      "type": "string"
+    },
+    {
+      "name": "event_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Event time of the triggering transaction."
+    },
+    {
+      "name": "ingest_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Kafka timestamp of the triggering event, i.e. when the gateway received it. detected_at - ingest_time = detection latency."
+    },
+    {
+      "name": "detected_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Processing time when Flink raised the alert."
+    },
+    {
+      "name": "score",
+      "type": "double",
+      "doc": "Observed value / threshold. 1.0 means just over."
+    },
+    {
+      "name": "details",
+      "type": "string"
+    }
+  ]
+}

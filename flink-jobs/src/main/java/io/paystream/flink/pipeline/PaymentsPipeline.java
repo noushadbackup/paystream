@@ -9,6 +9,9 @@ import io.paystream.flink.rules.MuleFanInRule;
 import io.paystream.flink.rules.NewDeviceCashOutRule;
 import io.paystream.flink.rules.RuleConfig;
 import io.paystream.flink.rules.VelocityRule;
+import io.paystream.flink.rules.dynamic.DynamicKeyFunction;
+import io.paystream.flink.rules.dynamic.DynamicRuleEvaluator;
+import io.paystream.flink.rules.dynamic.RuleUpdates;
 import java.time.Duration;
 import java.util.Set;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -29,7 +32,10 @@ import org.apache.flink.util.OutputTag;
  *                       └─ dedup by txn_id ─┬──────────────────────────▶ silver (one row per txn)
  *                                           ├─ 1-min KPI windows ─┬────▶ kpis
  *                                           │                     └────▶ late (missed their window)
- *                                           └─ success ─ 4 keyed rules ▶ alerts
+ *                                           ├─ success ─ 4 keyed rules ▶ alerts
+ *                                           └─ dynamic keys ─ analyst rules ▶ alerts
+ *                                                  ▲
+ *                     rule updates (broadcast) ────┘
  * </pre>
  */
 public final class PaymentsPipeline {
@@ -54,6 +60,12 @@ public final class PaymentsPipeline {
     }
 
     public static Outputs build(DataStream<Envelope> envelopes, RuleConfig rules, Duration dedupTtl) {
+        return build(envelopes, rules, dedupTtl, null);
+    }
+
+    /** @param ruleUpdates analyst rules as published JSON (see {@link RuleUpdates}); null for none. */
+    public static Outputs build(DataStream<Envelope> envelopes, RuleConfig rules, Duration dedupTtl,
+                                DataStream<String> ruleUpdates) {
         SingleOutputStreamOperator<Payment> valid = envelopes
                 .process(new ProcessFunction<Envelope, Payment>() {
                     @Override
@@ -91,6 +103,18 @@ public final class PaymentsPipeline {
                 .keyBy(p -> p.receiverId)
                 .process(new AgentFloatSpikeRule(rules)).name("rule-agent-spike").uid("rule-agent-spike");
 
+        DataStream<Alert> alerts = velocity.union(newDevice, mule, agentSpike);
+        if (ruleUpdates != null) {
+            // Dynamic rules see failed payments too: "5 failed PINs in 10 minutes" is a rule worth writing.
+            var broadcast = RuleUpdates.broadcast(ruleUpdates);
+            DataStream<Alert> dynamic = silver
+                    .connect(broadcast).process(new DynamicKeyFunction()).name("dynamic-keys").uid("dynamic-keys")
+                    .keyBy(k -> k.key)
+                    .connect(broadcast).process(new DynamicRuleEvaluator())
+                    .name("rule-dynamic").uid("rule-dynamic");
+            alerts = alerts.union(dynamic);
+        }
+
         SingleOutputStreamOperator<KpiMinute> kpis = silver
                 .keyBy(p -> p.txnType)
                 .window(TumblingEventTimeWindows.of(Duration.ofMinutes(1)))
@@ -98,7 +122,7 @@ public final class PaymentsPipeline {
                 .aggregate(new KpiAggregate(), new KpiAggregate.StampWindow())
                 .name("kpi-1min").uid("kpi-1min");
 
-        return new Outputs(valid, silver, velocity.union(newDevice, mule, agentSpike), kpis,
+        return new Outputs(valid, silver, alerts, kpis,
                 kpis.getSideOutput(LATE), valid.getSideOutput(INVALID));
     }
 }

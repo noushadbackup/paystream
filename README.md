@@ -16,7 +16,8 @@ flowchart TB
     pg[(Postgres ledger<br/>double-entry)]
     dbz[Debezium CDC]
     kafka[[Kafka + Schema Registry<br/>Avro contracts, BACKWARD compatible]]
-    flink[Flink, exactly-once<br/>dedup · event-time windows · 4 fraud rules]
+    flink[Flink, exactly-once<br/>dedup · event-time windows<br/>4 built-in detectors + analyst rules]
+    rules[Rules service<br/>versioned rules · maker-checker<br/>backtest · audit log]
     alerts[[fraud.alerts]]
     dlq[[payments.dlq]]
     lake[(Iceberg on MinIO<br/>bronze · silver · gold)]
@@ -24,6 +25,8 @@ flowchart TB
     airflow[Airflow<br/>nightly build, backfill, compaction]
     obs[Prometheus + Grafana]
 
+    rules -->|fraud.rules| kafka
+    lake -.backtest.-> rules
     gen -->|payments.events| kafka
     gen --> pg --> dbz --> kafka
     kafka --> flink
@@ -45,7 +48,10 @@ flowchart TB
 | No loss, no double counting on failure | Flink checkpoints + Iceberg commit-on-checkpoint; verified by killing the TaskManager and broker mid-run | [`IcebergTables`](flink-jobs/src/main/java/io/paystream/flink/sink/IcebergTables.java), [`chaos.sh`](scripts/chaos.sh) |
 | Schema changes | Avro in Schema Registry with BACKWARD compatibility; v1 producers keep working after v2 adds `channel` | [`schemas/`](schemas), [`SerdeTest`](flink-jobs/src/test/java/io/paystream/flink/serde/SerdeTest.java) |
 | Bad records | Undecodable records go to a dead-letter topic with offset and error; the job keeps running | [`PaymentEventDeserializer`](flink-jobs/src/main/java/io/paystream/flink/serde/PaymentEventDeserializer.java) |
-| Fraud in seconds | Four keyed rules fire on arrival, not on watermark: velocity, mule fan-in, new-device cash-out, agent float spike vs the agent's own baseline | [`rules/`](flink-jobs/src/main/java/io/paystream/flink/rules) |
+| Fraud in seconds | Four keyed detectors fire on arrival, not on watermark: velocity, mule fan-in, new-device cash-out, agent float spike vs the agent's own baseline | [`rules/`](flink-jobs/src/main/java/io/paystream/flink/rules) |
+| New fraud patterns without a deploy | Analysts write rules as JSON; Flink loads them through broadcast state and changes behaviour mid-stream, keeping state across restarts. New rules run in shadow first | [`DynamicRuleEvaluator`](flink-jobs/src/main/java/io/paystream/flink/rules/dynamic/DynamicRuleEvaluator.java), [`rules/library`](rules/library) |
+| Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
+| Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI | [`rules/conformance`](rules/conformance) |
 | Money correctness | Integer paisa everywhere; double-entry ledger with a deferred balance check; daily stream vs ledger reconciliation | [`ledger/`](ledger/001_schema.sql), [`recon_stream_vs_ledger`](dbt/models/marts/recon_stream_vs_ledger.sql) |
 | Reprocessing | Bronze keeps every record as received; Airflow rebuilds a day of silver from bronze, then gold | [`paystream_backfill`](airflow/dags/paystream_backfill.py) |
 | Operating it | Grafana: throughput, consumer lag, alert latency, checkpoints, watermark lag | [`monitoring/`](monitoring) |
@@ -65,13 +71,15 @@ make up          # starts the stack, creates topics, registers the CDC connector
 make load        # 1,000 payments/s for 10 minutes into Kafka and the ledger
 make sql         # Trino: SELECT * FROM silver.fraud_alerts ORDER BY detected_at DESC LIMIT 20;
 make console     # Fraud Ops Console on the live stack: http://localhost:8501
+make rules-demo  # draft, backtest, approve and publish a rule; Flink runs it within seconds
 make up-batch    # Airflow at http://localhost:8088 (nightly dbt build, backfill DAG)
 make bench       # RATE=5000 DURATION=1800, writes benchmarks/runs/<time>.json
 make bench CHAOS=1
 make down
 ```
 
-UIs: Flink http://localhost:8082 · Grafana http://localhost:3000 · MinIO http://localhost:9001.
+UIs: Flink http://localhost:8082 · Grafana http://localhost:3000 · MinIO http://localhost:9001 ·
+Rules API http://localhost:8090/docs.
 
 ## Tests
 
@@ -80,8 +88,13 @@ UIs: Flink http://localhost:8082 · Grafana http://localhost:3000 · MinIO http:
 * **Generator** (pytest): reproducibility, rate, late and duplicate injection, fraud scenario shape,
   Avro contract validity for v1 and v2, and that a v2 reader reads v1 data.
 * **Flink** (JUnit, Flink test harness): each rule against real keyed state, timers and watermarks;
+  analyst rules hot-swapped mid-stream, versions never rolling back, history freed when a rule is
+  disabled, and rules plus history surviving a restore from checkpoint;
   dedup surviving a snapshot and restore; Avro decoding, schema evolution and DLQ routing; and an
   end-to-end run of the whole job graph into a real Iceberg catalog on local disk.
+* **Rules service** (pytest): draft, submit, approve and reject; the author cannot approve; a failed
+  publish leaves nothing live; the kill switch; tampering with the audit log is detected; the HTTP API
+  with roles; and the conformance vectors, which the Flink tests also run.
 * **dbt** (DuckDB in CI, Trino in the stack): uniqueness, accepted values, positive amounts,
   double-entry balance, and closed-day reconciliation.
 
@@ -95,7 +108,9 @@ ran on.
 ```
 generator/     Python traffic simulator (Kafka, JSONL, ledger sinks)
 schemas/       Avro contracts; history/ holds earlier versions
-flink-jobs/    Java: PaymentsJob (stream core) and LedgerCdcJob
+flink-jobs/    Java: PaymentsJob (stream core, built-in detectors, analyst-rule engine) and LedgerCdcJob
+rules/         analyst rule contract (JSON Schema), starter library, conformance vectors
+rules-service/ Python: rule lifecycle API, maker-checker, audit log, backtester
 ledger/        Postgres double-entry ledger schema
 connect/       Debezium connector config
 dbt/           staging + gold models on Trino; DuckDB target for CI

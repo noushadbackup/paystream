@@ -29,4 +29,13 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: [VELOCITY, MULE_FAN_IN, NEW_DEVICE_CASH_OUT, AGENT_FLOAT_SPIKE]
+                values: [VELOCITY, MULE_FAN_IN, NEW_DEVICE_CASH_OUT, AGENT_FLOAT_SPIKE, DYNAMIC]
+      - name: action
+        tests:
+          - accepted_values:
+              arguments:
+                values: [REVIEW, DECLINE]
+  - name: stg_fraud_labels
+    columns:
+      - name: txn_id
+        tests: [not_null]

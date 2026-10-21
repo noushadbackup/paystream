@@ -1,0 +1,21 @@
+{
+  "description": "COUNT_DISTINCT counts accounts, not payments; grouping by device_id partitions by device.",
+  "rules": [
+    {"rule_id": "device-shared-by-accounts", "version": 1, "state": "ACTIVE", "group_by": "device_id",
+     "when": [{"field": "sender_id", "op": "starts_with", "value": "U"}],
+     "aggregate": {"fn": "COUNT_DISTINCT", "field": "sender_id"}, "window_s": 600,
+     "threshold": {"op": ">=", "value": 3}, "cooldown_s": 600, "action": "REVIEW"}
+  ],
+  "events": [
+    {"txn_id": "F1", "at": "2026-10-01T10:00:00Z", "device_id": "FARM", "sender_id": "U1"},
+    {"txn_id": "F2", "at": "2026-10-01T10:01:00Z", "device_id": "FARM", "sender_id": "U1"},
+    {"txn_id": "F3", "at": "2026-10-01T10:02:00Z", "device_id": "FARM", "sender_id": "U2"},
+    {"txn_id": "F4", "at": "2026-10-01T10:03:00Z", "device_id": "OTHER", "sender_id": "U3"},
+    {"txn_id": "F5", "at": "2026-10-01T10:04:00Z", "device_id": "FARM", "sender_id": "A77"},
+    {"txn_id": "F6", "at": "2026-10-01T10:05:00Z", "device_id": "FARM", "sender_id": "U3"},
+    {"txn_id": "F7", "at": "2026-10-01T10:06:00Z", "device_id": "FARM", "sender_id": "U4"}
+  ],
+  "expected": [
+    {"rule_id": "device-shared-by-accounts", "key": "FARM", "trigger_txn_id": "F6", "observed": 3}
+  ]
+}

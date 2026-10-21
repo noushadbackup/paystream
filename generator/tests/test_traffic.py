@@ -63,7 +63,8 @@ def test_cash_in_comes_from_agent_cash_out_goes_to_agent(pop):
 def test_fraud_scenarios_are_labelled_and_shaped(pop):
     events = run(pop, 600, fraud_scale=5)
     by_scenario = Counter(e.scenario for e in events if e.scenario)
-    assert set(by_scenario) == {"velocity_burst", "account_takeover", "mule_ring", "agent_float_spike"}
+    assert set(by_scenario) == {"velocity_burst", "account_takeover", "mule_ring", "agent_float_spike",
+                                "pin_brute_force", "device_farm", "structuring"}
     ato = [e.event for e in events if e.scenario == "account_takeover"]
     assert all(ev["device_id"].startswith("X") and ev["amount_paisa"] >= 18_000 * 100 for ev in ato)
 
@@ -77,6 +78,16 @@ def test_every_fraud_event_names_its_subject(pop):
     for e in run(pop, 600, fraud_scale=5):
         if e.scenario:
             ev = e.event
-            assert e.subject in (ev["sender_id"], ev["receiver_id"])
+            assert e.subject in (ev["sender_id"], ev["receiver_id"], ev["device_id"])
             if e.scenario == "mule_ring" and ev["txn_type"] == "P2P":
                 assert e.subject == ev["receiver_id"]
+
+
+def test_new_scenarios_have_the_shape_their_rules_look_for(pop):
+    events = run(pop, 3600, fraud_scale=3)
+    pins = [e.event for e in events if e.scenario == "pin_brute_force"]
+    assert sum(ev["status"] == "FAILED" for ev in pins) >= 5
+    farm = Counter(e.subject for e in events if e.scenario == "device_farm")
+    assert all(n >= 4 for n in farm.values())
+    cash_ins = [e.event for e in events if e.scenario == "structuring"]
+    assert all(ev["txn_type"] == "CASH_IN" and ev["amount_paisa"] >= 20_000 * 100 for ev in cash_ins)

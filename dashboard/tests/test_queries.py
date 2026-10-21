@@ -53,3 +53,17 @@ def test_account_lookup(b, now):
     payments, alerts = q.account(b, alert["account_id"], now)
     assert not alerts.empty and not payments.empty
     assert isinstance(payments, pd.DataFrame)
+
+
+def test_analyst_rules_appear_by_name_and_shadow_is_kept_out_of_the_feed(b, now):
+    names = q.rule_names(b)
+    assert {"VELOCITY", "failed-pin-burst", "device-farm"} <= set(names)
+    feed = q.alert_feed(b, now, ["failed-pin-burst"], limit=5)
+    assert not feed.empty and set(feed["action"]) == {"DECLINE"}
+    assert q.shadow_alerts(b, now).empty or q.shadow_alerts(b, now)["rule"].notna().all()
+
+
+def test_rule_performance(b):
+    perf = q.rule_performance(b).set_index("rule")
+    assert perf.loc["failed-pin-burst", "precision_vs_labels"] > 0.9
+    assert perf["alerts"].sum() == b.df("SELECT count(*) AS n FROM silver.fraud_alerts")["n"].iloc[0]

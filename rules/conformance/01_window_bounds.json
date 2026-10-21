@@ -1,0 +1,21 @@
+{
+  "description": "The window is (t - window, t]: an event exactly one window older does not count.",
+  "rules": [
+    {"rule_id": "three-in-a-minute", "version": 1, "state": "ACTIVE", "group_by": "sender_id",
+     "when": [], "aggregate": {"fn": "COUNT"}, "window_s": 60,
+     "threshold": {"op": ">=", "value": 3}, "cooldown_s": 0, "action": "REVIEW"}
+  ],
+  "events": [
+    {"txn_id": "A1", "at": "2026-10-01T10:00:00Z"},
+    {"txn_id": "A2", "at": "2026-10-01T10:00:30Z"},
+    {"txn_id": "A3", "at": "2026-10-01T10:00:59Z"},
+    {"txn_id": "A4", "at": "2026-10-01T10:01:59Z"},
+    {"txn_id": "A5", "at": "2026-10-01T10:02:00Z"},
+    {"txn_id": "A6", "at": "2026-10-01T10:02:01Z"},
+    {"txn_id": "B1", "at": "2026-10-01T10:02:01Z", "sender_id": "U9"}
+  ],
+  "expected": [
+    {"rule_id": "three-in-a-minute", "key": "U1", "trigger_txn_id": "A3", "observed": 3},
+    {"rule_id": "three-in-a-minute", "key": "U1", "trigger_txn_id": "A6", "observed": 3}
+  ]
+}

@@ -3,8 +3,10 @@ package io.paystream.flink.pipeline;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.paystream.flink.model.Envelope;
+import io.paystream.flink.model.Label;
 import io.paystream.flink.model.Payment;
 import io.paystream.flink.rules.RuleConfig;
+import io.paystream.flink.rules.dynamic.RuleUpdates;
 import io.paystream.flink.sink.IcebergTables;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -14,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import org.apache.flink.api.common.eventtime.Watermark;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.eventtime.WatermarkGenerator;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -51,6 +54,13 @@ class PipelineIcebergIT {
                 input.add(Envelope.ok(Payment.of("N" + n, T0 + s * 1000L + k * 300, k == 0 ? "P2P" : "MERCHANT_PAY",
                         "U" + n, k == 0 ? "U" + (n + 1) : "M1", 50_000, "D" + n)));
             }
+            if (s == 150) {
+                // a device farm: one phone, five accounts, caught by an analyst rule published at runtime
+                for (int f = 0; f < 5; f++) {
+                    input.add(Envelope.ok(Payment.of("F" + f, T0 + s * 1000L + f * 1000L, "P2P", "U_FARM" + f,
+                            "U1", 20_000, "D_FARM")));
+                }
+            }
             if (s == 100) {
                 // a velocity burst: 8 transfers from one account in 16 seconds
                 for (int b = 0; b < 8; b++) {
@@ -65,8 +75,11 @@ class PipelineIcebergIT {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
-        DataStream<Envelope> envelopes = env.fromData(input).assignTimestampsAndWatermarks(perEventWatermarks());
-        PaymentsPipeline.Outputs out = PaymentsPipeline.build(envelopes, new RuleConfig(), Duration.ofHours(2));
+        DataStream<Envelope> envelopes = env.fromData(input)
+                .map(new RulesFirst()) // publication precedes traffic, as on a running cluster
+                .assignTimestampsAndWatermarks(perEventWatermarks());
+        DataStream<String> rules = env.fromData(DEVICE_RULE).assignTimestampsAndWatermarks(RuleUpdates.watermarks());
+        PaymentsPipeline.Outputs out = PaymentsPipeline.build(envelopes, new RuleConfig(), Duration.ofHours(2), rules);
         out.dlq().addSink(new SinkFunction<>() {
             @Override
             public void invoke(Envelope e, Context ctx) {
@@ -80,6 +93,12 @@ class PipelineIcebergIT {
         IcebergTables.createCatalog(tEnv, catalog);
         StreamStatementSet set = tEnv.createStatementSet();
         IcebergTables.insertAll(tEnv, set, out);
+        Label label = new Label();
+        label.txnId = "F3";
+        label.scenario = "device_farm";
+        label.accountId = "D_FARM";
+        label.labelledAt = T0;
+        IcebergTables.insertLabels(tEnv, set, env.fromData(label));
         set.attachAsDataStream();
         env.execute("pipeline-it");
 
@@ -88,16 +107,43 @@ class PipelineIcebergIT {
         batch.executeSql("CREATE CATALOG lake WITH ('type'='iceberg', 'catalog-type'='hadoop', 'warehouse'='"
                 + warehouse.toUri() + "')");
 
-        long normal = 360, burst = 8;
-        assertThat(count(batch, "SELECT count(*) FROM lake.bronze.payment_events")).isEqualTo(normal + burst + 2);
-        assertThat(count(batch, "SELECT count(*) FROM lake.silver.payments")).isEqualTo(normal + burst + 1);
-        assertThat(count(batch, "SELECT count(DISTINCT txn_id) FROM lake.silver.payments")).isEqualTo(normal + burst + 1);
+        long normal = 360, fraud = 8 + 5;
+        assertThat(count(batch, "SELECT count(*) FROM lake.bronze.payment_events")).isEqualTo(normal + fraud + 2);
+        assertThat(count(batch, "SELECT count(*) FROM lake.silver.payments")).isEqualTo(normal + fraud + 1);
+        assertThat(count(batch, "SELECT count(DISTINCT txn_id) FROM lake.silver.payments")).isEqualTo(normal + fraud + 1);
         assertThat(count(batch, "SELECT count(*) FROM lake.silver.late_payments WHERE txn_id = 'LATE1'")).isEqualTo(1);
         assertThat(count(batch, "SELECT count(*) FROM lake.silver.fraud_alerts"
                 + " WHERE rule = 'VELOCITY' AND account_id = 'U_BURST'")).isEqualTo(1);
+        try (CloseableIterator<Row> it = batch.executeSql("SELECT rule, rule_id, rule_version, shadow, action"
+                + " FROM lake.silver.fraud_alerts WHERE account_id = 'D_FARM'").collect()) {
+            assertThat(it.next().toString()).isEqualTo("+I[DYNAMIC, device-farm, 2, false, DECLINE]");
+            assertThat(it.hasNext()).isFalse();
+        }
+        assertThat(count(batch, "SELECT count(*) FROM lake.silver.fraud_labels l JOIN lake.silver.fraud_alerts a"
+                + " ON a.account_id = l.account_id WHERE a.rule_id = 'device-farm'")).isEqualTo(1);
         // the KPI windows hold every on-time transaction exactly once
-        assertThat(count(batch, "SELECT sum(txn_count) FROM lake.gold.kpi_minute")).isEqualTo(normal + burst);
+        assertThat(count(batch, "SELECT sum(txn_count) FROM lake.gold.kpi_minute")).isEqualTo(normal + fraud);
         assertThat(DLQ).singleElement().satisfies(e -> assertThat(e.offset).isEqualTo(7));
+    }
+
+    static final String DEVICE_RULE = """
+        {"rule_id": "device-farm", "version": 2, "state": "ACTIVE", "group_by": "device_id",
+         "when": [{"field": "sender_id", "op": "starts_with", "value": "U"}],
+         "aggregate": {"fn": "COUNT_DISTINCT", "field": "sender_id"}, "window_s": 600,
+         "threshold": {"op": ">=", "value": 4}, "cooldown_s": 600, "action": "DECLINE"}""";
+
+    /** Holds the payment source back briefly so the rule publication is processed first. */
+    static final class RulesFirst implements MapFunction<Envelope, Envelope> {
+        private boolean started;
+
+        @Override
+        public Envelope map(Envelope e) throws Exception {
+            if (!started) {
+                Thread.sleep(1_500);
+                started = true;
+            }
+            return e;
+        }
     }
 
     private static long count(TableEnvironment t, String sql) throws Exception {
