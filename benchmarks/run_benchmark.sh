@@ -12,7 +12,13 @@ mkdir -p "$RUN_DIR"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 
 echo "== machine"
-{ uname -sm; nproc; free -g 2>/dev/null | awk '/Mem/{print $2 " GB RAM"}' || sysctl -n hw.memsize; } | tee "$RUN_DIR/$STAMP.machine.txt"
+# Host RAM has no portable command (free on Linux, sysctl on macOS, neither in Git Bash), so also
+# record what Docker itself is allowed to use: on Docker Desktop that is the real ceiling.
+{ uname -sm; nproc
+  if command -v free >/dev/null; then free -g | awk '/Mem/{print $2 " GB RAM"}'
+  elif command -v sysctl >/dev/null; then echo "$(( $(sysctl -n hw.memsize) / 1073741824 )) GB RAM"; fi
+  docker info --format 'docker: {{.NCPU}} CPUs, {{.MemTotal}} bytes memory, {{.OperatingSystem}}'
+} | tee "$RUN_DIR/$STAMP.machine.txt"
 
 echo "== load: $RATE events/s for $DURATION s (seed $SEED)"
 docker compose --profile load run -d --rm --name paystream-load generator \

@@ -1,0 +1,3 @@
+# The stack runs in Linux containers: keep LF endings even on Windows checkouts (autocrlf=true
+# would turn mounted shell scripts into CRLF and break them).
+* text=auto eol=lf
