@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  generator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e "generator[dev]"
+      - name: Lint
+        run: ruff check generator benchmarks dbt/ci airflow/dags
+      - name: Tests (incl. Avro contract and backward compatibility)
+        run: cd generator && pytest -q
+
+  flink:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17", cache: maven }
+      - name: Unit tests + end-to-end pipeline into a local Iceberg catalog
+        run: cd flink-jobs && mvn -B -q verify
+
+  dbt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e generator "dbt-core>=1.10,<2" dbt-duckdb duckdb
+      - name: Build fixture from the generator, then models + data tests on DuckDB
+        run: |
+          cd dbt
+          python ci/build_fixture.py
+          dbt build --profiles-dir . --target duckdb
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose file is valid
+        run: docker compose --profile batch --profile load config -q
+      - name: Airflow DAGs compile
+        run: python -m py_compile airflow/dags/*.py

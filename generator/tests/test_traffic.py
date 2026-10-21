@@ -71,3 +71,12 @@ def test_fraud_scenarios_are_labelled_and_shaped(pop):
 def test_v1_events_have_no_channel(pop):
     assert all("channel" not in e.event for e in run(pop, 5, schema_version=1))
     assert all("channel" in e.event for e in run(pop, 5, schema_version=2))
+
+
+def test_every_fraud_event_names_its_subject(pop):
+    for e in run(pop, 600, fraud_scale=5):
+        if e.scenario:
+            ev = e.event
+            assert e.subject in (ev["sender_id"], ev["receiver_id"])
+            if e.scenario == "mule_ring" and ev["txn_type"] == "P2P":
+                assert e.subject == ev["receiver_id"]

@@ -1,0 +1,13 @@
+version: 2
+
+models:
+  - name: fct_daily_kpis
+    description: Daily KPIs per transaction type, late events included.
+  - name: fct_merchant_revenue_daily
+  - name: fct_agent_liquidity_daily
+  - name: fct_fraud_alerts_daily
+  - name: recon_stream_vs_ledger
+    description: One row per day. status = BROKEN means money moved in one system and not the other.
+    columns:
+      - name: event_date
+        tests: [unique, not_null]

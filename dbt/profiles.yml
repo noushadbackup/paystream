@@ -1,0 +1,18 @@
+paystream:
+  target: trino
+  outputs:
+    trino:
+      type: trino
+      method: none
+      user: dbt
+      host: "{{ env_var('TRINO_HOST', 'localhost') }}"
+      port: "{{ env_var('TRINO_PORT', '8080') | int }}"
+      database: lake
+      schema: gold
+      threads: 4
+    # CI and quick local checks: the same models on DuckDB against a generated fixture.
+    duckdb:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', 'ci/ci.duckdb') }}"
+      schema: gold
+      threads: 4

@@ -61,6 +61,7 @@ class Emitted:
     event: dict
     scenario: str | None = None
     is_duplicate: bool = False
+    subject: str | None = None  # the account a fraud scenario is about: who should be flagged
 
 
 class Simulator:
@@ -171,8 +172,8 @@ class Simulator:
         while self._pending and self._pending[0][0] < until_ms:
             yield heapq.heappop(self._pending)[2]
 
-    def _fraud(self, scenario: str, event: dict) -> None:
-        self._push(Emitted(event["event_time"], event, scenario=scenario))
+    def _fraud(self, scenario: str, subject: str, event: dict) -> None:
+        self._push(Emitted(event["event_time"], event, scenario=scenario, subject=subject))
 
     # ------------------------------------------------------------- scenarios
     # Each scenario schedules future events into the same queue as normal traffic,
@@ -188,7 +189,7 @@ class Simulator:
             t += rng.randint(2_000, 5_000)
             receiver = self.pop.users[rng.randrange(len(self.pop.users))]
             amount = rng.randint(1_000, 5_000) * BDT
-            self._fraud("velocity_burst",
+            self._fraud("velocity_burst", user,
                         self._event(t, "P2P", user, receiver, amount, self.pop.device_of(user), district, "SUCCESS"))
 
     def _scenario_account_takeover(self, t0: int) -> None:
@@ -202,7 +203,8 @@ class Simulator:
             t += rng.randint(5_000, 90_000)
             amount = rng.randint(18_000, 25_000) * BDT
             agent = self.pop.pick_agent(rng, district)
-            self._fraud("account_takeover", self._event(t, "CASH_OUT", user, agent, amount, device, district, "SUCCESS"))
+            self._fraud("account_takeover", user,
+                        self._event(t, "CASH_OUT", user, agent, amount, device, district, "SUCCESS"))
 
     def _scenario_mule_ring(self, t0: int) -> None:
         """Many victims send money to one mule account within minutes, then the mule cashes out."""
@@ -216,10 +218,10 @@ class Simulator:
             victim = self.pop.users[v]
             amount = rng.randint(2_000, 9_000) * BDT
             total += amount
-            self._fraud("mule_ring", self._event(t, "P2P", victim, mule, amount, self.pop.device_of(victim),
+            self._fraud("mule_ring", mule, self._event(t, "P2P", victim, mule, amount, self.pop.device_of(victim),
                                                  self.pop.user_district[v], "SUCCESS"))
         agent = self.pop.pick_agent(rng, mule_district)
-        self._fraud("mule_ring", self._event(t + 60_000, "CASH_OUT", mule, agent, min(total, MAX_TXN_PAISA),
+        self._fraud("mule_ring", mule, self._event(t + 60_000, "CASH_OUT", mule, agent, min(total, MAX_TXN_PAISA),
                                              self.pop.device_of(mule), mule_district, "SUCCESS"))
 
     def _scenario_agent_float_spike(self, t0: int) -> None:
@@ -233,5 +235,5 @@ class Simulator:
             u = rng.randrange(len(self.pop.users))
             user = self.pop.users[u]
             amount = rng.randint(5_000, 15_000) * BDT
-            self._fraud("agent_float_spike",
+            self._fraud("agent_float_spike", agent,
                         self._event(t, "CASH_OUT", user, agent, amount, self.pop.device_of(user), district, "SUCCESS"))

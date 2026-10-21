@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: stg_payments
+    columns:
+      - name: txn_id
+        tests: [unique, not_null]
+      - name: amount_paisa
+        tests: [not_null, positive]
+      - name: txn_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: [P2P, CASH_IN, CASH_OUT, MERCHANT_PAY, AIRTIME]
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [SUCCESS, FAILED]
+  - name: stg_ledger_transfers
+    columns:
+      - name: txn_id
+        tests: [unique, not_null]
+  - name: stg_fraud_alerts
+    columns:
+      - name: alert_id
+        tests: [unique, not_null]
+      - name: rule
+        tests:
+          - accepted_values:
+              arguments:
+                values: [VELOCITY, MULE_FAN_IN, NEW_DEVICE_CASH_OUT, AGENT_FLOAT_SPIKE]

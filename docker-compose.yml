@@ -1,0 +1,230 @@
+# PayStream local stack. `make up` starts the core; `make up-batch` adds Airflow.
+# Sized for a 16 GB laptop: about 10 GB in use with the core running.
+
+x-s3-env: &s3-env
+  AWS_ACCESS_KEY_ID: minio
+  AWS_SECRET_ACCESS_KEY: minio12345
+  AWS_REGION: us-east-1
+
+x-flink-conf: &flink-conf |
+  jobmanager.rpc.address: jobmanager
+  taskmanager.numberOfTaskSlots: 4
+  parallelism.default: 4
+  state.backend.type: rocksdb
+  state.backend.incremental: true
+  execution.checkpointing.dir: s3://checkpoints/flink
+  execution.checkpointing.savepoint-dir: s3://checkpoints/savepoints
+  s3.endpoint: http://minio:9000
+  s3.path.style.access: true
+  s3.access-key: minio
+  s3.secret-key: minio12345
+  restart-strategy.type: exponential-delay
+  metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+  metrics.reporter.prom.port: 9249
+  metrics.latency.interval: 0
+  jobmanager.memory.process.size: 1600m
+  taskmanager.memory.process.size: 4096m
+
+services:
+  kafka:
+    image: apache/kafka:3.8.1
+    hostname: kafka
+    ports: ["9094:9094"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 72
+      KAFKA_HEAP_OPTS: -Xmx1g -Xms1g
+    healthcheck:
+      test: /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+      interval: 10s
+      retries: 12
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.7.1
+    ports: ["8081:8081"]
+    depends_on: { kafka: { condition: service_healthy } }
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: backward
+    healthcheck:
+      test: curl -sf http://localhost:8081/subjects
+      interval: 10s
+      retries: 12
+
+  kafka-init:
+    image: apache/kafka:3.8.1
+    depends_on: { kafka: { condition: service_healthy } }
+    volumes: ["./scripts/create-topics.sh:/create-topics.sh:ro"]
+    entrypoint: ["/bin/bash", "/create-topics.sh"]
+    restart: "no"
+
+  postgres:
+    image: postgres:16
+    ports: ["5432:5432"]
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=4", "-c", "max_wal_senders=4"]
+    environment:
+      POSTGRES_USER: paystream
+      POSTGRES_PASSWORD: paystream
+      POSTGRES_DB: paystream
+    volumes:
+      - ./scripts/airflow-db.sql:/docker-entrypoint-initdb.d/000_airflow.sql:ro
+      - ./ledger/001_schema.sql:/docker-entrypoint-initdb.d/001_ledger.sql:ro
+    healthcheck:
+      test: pg_isready -U paystream
+      interval: 5s
+      retries: 12
+
+  connect:
+    image: quay.io/debezium/connect:2.7.3.Final
+    ports: ["8083:8083"]
+    depends_on:
+      kafka: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: paystream-connect
+      CONFIG_STORAGE_TOPIC: _connect_configs
+      OFFSET_STORAGE_TOPIC: _connect_offsets
+      STATUS_STORAGE_TOPIC: _connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      HEAP_OPTS: -Xmx768m
+    healthcheck:
+      test: curl -sf http://localhost:8083/connectors
+      interval: 10s
+      retries: 18
+
+  connect-init:
+    image: curlimages/curl:8.10.1
+    depends_on: { connect: { condition: service_healthy } }
+    volumes: ["./connect/ledger-connector.json:/ledger-connector.json:ro"]
+    # PUT .../config is idempotent: creates the connector or updates it in place.
+    command: ["-sf", "-X", "PUT", "-H", "Content-Type: application/json", "--data", "@/ledger-connector.json",
+              "http://connect:8083/connectors/ledger-cdc/config"]
+    restart: "no"
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    ports: ["9000:9000", "9001:9001"]
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    volumes: ["minio-data:/data"]
+    healthcheck:
+      test: mc ready local
+      interval: 5s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    depends_on: { minio: { condition: service_healthy } }
+    entrypoint: >
+      sh -c "mc alias set local http://minio:9000 minio minio12345 &&
+      mc mb -p local/warehouse local/checkpoints && echo buckets ready"
+    restart: "no"
+
+  iceberg-rest:
+    image: tabulario/iceberg-rest:1.6.0
+    ports: ["8181:8181"]
+    depends_on: { minio-init: { condition: service_completed_successfully } }
+    environment:
+      <<: *s3-env
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      CATALOG_URI: jdbc:sqlite:file:/catalog/iceberg.db
+      CATALOG_JDBC_USER: user
+      CATALOG_JDBC_PASSWORD: password
+    volumes: ["catalog-data:/catalog"]
+
+  jobmanager:
+    build: { context: ., dockerfile: flink-jobs/Dockerfile }
+    image: paystream/flink:local
+    ports: ["8082:8081"]
+    command: jobmanager
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+    environment:
+      <<: *s3-env
+      FLINK_PROPERTIES: *flink-conf
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-presto-1.20.1.jar
+
+  taskmanager:
+    image: paystream/flink:local
+    command: taskmanager
+    depends_on: [jobmanager]
+    environment:
+      <<: *s3-env
+      FLINK_PROPERTIES: *flink-conf
+      ENABLE_BUILT_IN_PLUGINS: flink-s3-fs-presto-1.20.1.jar
+
+  trino:
+    image: trinodb/trino:463
+    ports: ["8080:8080"]
+    depends_on: [iceberg-rest]
+    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    ports: ["9090:9090"]
+    volumes: ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.8.0
+    command: ["--kafka.server=kafka:9092"]
+    depends_on: { kafka: { condition: service_healthy } }
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports: ["3000:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  airflow:
+    build: { context: airflow }
+    profiles: [batch]
+    command: standalone
+    ports: ["8088:8080"]
+    depends_on: { postgres: { condition: service_healthy } }
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://paystream:paystream@postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      PAYSTREAM_DBT_DIR: /opt/paystream/dbt
+      TRINO_HOST: trino
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags:ro
+      - ./dbt:/opt/paystream/dbt
+
+  generator:
+    build: { context: ., dockerfile: generator/Dockerfile }
+    profiles: [load]
+    depends_on: { schema-registry: { condition: service_healthy } }
+    command: ["--sink", "kafka", "--bootstrap", "kafka:9092", "--registry", "http://schema-registry:8081",
+              "--ledger-dsn", "postgresql://paystream:paystream@postgres:5432/paystream",
+              "--realtime", "--rate", "1000", "--duration", "3600"]
+
+volumes:
+  minio-data:
+  catalog-data:

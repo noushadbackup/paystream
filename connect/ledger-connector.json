@@ -1,0 +1,22 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "plugin.name": "pgoutput",
+  "publication.name": "paystream_ledger",
+  "publication.autocreate.mode": "disabled",
+  "slot.name": "paystream_ledger",
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "paystream",
+  "database.password": "paystream",
+  "database.dbname": "paystream",
+  "topic.prefix": "ledger",
+  "table.include.list": "ledger.transfers,ledger.entries",
+  "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "key.converter.schemas.enable": "false",
+  "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.schemas.enable": "false",
+  "decimal.handling.mode": "precise",
+  "topic.creation.default.replication.factor": "1",
+  "topic.creation.default.partitions": "6",
+  "heartbeat.interval.ms": "10000"
+}

@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: silver
+    database: "{{ target.database }}"
+    schema: silver
+    description: Written by the Flink jobs (exactly-once Iceberg sinks).
+    freshness:
+      warn_after: { count: 5, period: minute }
+      error_after: { count: 30, period: minute }
+    loaded_at_field: ingest_time
+    tables:
+      - name: payments
+        description: Gateway payments, deduplicated by txn_id in Flink. Includes late events.
+      - name: fraud_alerts
+        loaded_at_field: detected_at
+      - name: ledger_transfers
+        description: Postgres ledger transfers, mirrored through Debezium CDC.
+        loaded_at_field: posted_at
+      - name: ledger_entries
+        loaded_at_field: posted_at

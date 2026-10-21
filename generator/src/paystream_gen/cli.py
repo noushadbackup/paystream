@@ -23,7 +23,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--sink", choices=["kafka", "jsonl"], default="jsonl")
     p.add_argument("--out", default="-", help="jsonl output path, - for stdout")
-    p.add_argument("--bootstrap", default="localhost:9092")
+    p.add_argument("--bootstrap", default="localhost:9094")
     p.add_argument("--registry", default="http://localhost:8081")
     p.add_argument("--topic", default="payments.events")
     p.add_argument("--labels-topic", default="fraud.labels")

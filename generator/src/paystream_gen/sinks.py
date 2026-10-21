@@ -66,9 +66,8 @@ class KafkaSink:
                 self._events.poll(0.05)
         self._events.poll(0)
         if e.scenario and not e.is_duplicate:
-            account = ev["receiver_id"] if e.scenario in ("mule_ring", "agent_float_spike") else ev["sender_id"]
             self._labels.produce(self._labels_topic, key=ev["txn_id"],
-                                 value={"txn_id": ev["txn_id"], "scenario": e.scenario, "account_id": account})
+                                 value={"txn_id": ev["txn_id"], "scenario": e.scenario, "account_id": e.subject})
             self._labels.poll(0)
 
     def close(self) -> None:

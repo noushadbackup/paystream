@@ -11,3 +11,4 @@ benchmarks/runs/
 .env
 .idea/
 .vscode/
+dbt/ci/*.duckdb*
