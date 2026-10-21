@@ -1,0 +1,52 @@
+{{- $v := .Values.caseService }}
+{{- range $role := list "api" "consumer" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: case-{{ $role }}
+  labels:
+    app: case-{{ $role }}
+    {{- include "paystream.labels" $ | nindent 4 }}
+spec:
+  replicas: {{ eq $role "api" | ternary $v.replicas $v.consumerReplicas }}
+  selector: { matchLabels: { app: case-{{ $role }} } }
+  template:
+    metadata: { labels: { app: case-{{ $role }} } }
+    spec:
+      serviceAccountName: case-service
+      containers:
+        - name: {{ $role }}
+          image: {{ include "paystream.image" (dict "root" $ "name" "case-service") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- if eq $role "consumer" }}
+          command: ["paystream-cases", "consume"]
+          {{- else }}
+          ports: [{ name: http, containerPort: 8097 }]
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
+          {{- end }}
+          env:
+            {{- include "paystream.kafkaEnv" (dict "root" $ "user" "case-service") | nindent 12 }}
+            {{- include "paystream.redisEnv" $ | nindent 12 }}
+            - { name: SCHEMA_REGISTRY_URL, value: {{ $.Values.schemaRegistry.url | quote }} }
+            - name: CASES_DB
+              valueFrom: { secretKeyRef: { name: {{ $v.dbSecret }}, key: url } }
+            - name: PAYSTREAM_CASES_TOKENS
+              valueFrom: { secretKeyRef: { name: {{ $v.tokensSecret }}, key: tokens } }
+            - { name: HOME, value: /tmp }
+          resources: {{- toYaml $v.resources | nindent 12 }}
+          {{- include "paystream.securityContext" $ | nindent 10 }}
+          volumeMounts:
+            - { name: kafka-ca, mountPath: /etc/kafka-ca, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "paystream.kafkaCaVolume" $ | nindent 8 }}
+        - { name: tmp, emptyDir: {} }
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: case-service, labels: { app: case-api } }
+spec:
+  selector: { app: case-api }
+  ports: [{ name: http, port: 8097, targetPort: http }]

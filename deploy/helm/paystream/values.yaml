@@ -1,0 +1,80 @@
+# Values for one environment. Kafka (Strimzi) and the Flink jobs are separate manifests in deploy/k8s;
+# cloud resources (buckets, Postgres, Redis, IAM roles) come from deploy/terraform outputs.
+image:
+  registry: REGISTRY/paystream
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+kafka:
+  bootstrap: paystream-kafka-bootstrap:9093
+  caSecret: paystream-cluster-ca-cert   # written by Strimzi
+
+redis:
+  host: REDIS_ENDPOINT    # ElastiCache primary endpoint (terraform output)
+  port: 6379
+  tls: true
+  authSecret: online-store   # key: auth-token
+
+schemaRegistry:
+  url: http://schema-registry:8081
+  image: confluentinc/cp-schema-registry:7.7.1
+  replicas: 2
+
+icebergRest:
+  image: tabulario/iceberg-rest:1.6.0
+  warehouse: s3://LAKE_BUCKET/
+  region: AWS_REGION
+  jdbcSecret: iceberg-catalog-db   # keys: uri, username, password
+
+# IAM roles for service accounts (terraform outputs); empty when not on EKS
+serviceAccounts:
+  lakeCatalog: ""     # iceberg-rest: commits table metadata to the lake bucket
+  modelsReader: ""    # decision-service: reads the model registry
+
+networkPolicy:
+  enabled: true
+  monitoringNamespace: monitoring      # Prometheus scrapes
+  ingressNamespace: ingress-nginx      # analysts reach the console and the case API through the ingress
+  flinkOperatorNamespace: flink-operator
+
+decisionService:
+  replicas: 3
+  workers: 2
+  storeTimeoutMs: 25
+  resources:
+    requests: { cpu: "2", memory: 1Gi }
+    limits: { memory: 1Gi }
+  autoscaling: { minReplicas: 3, maxReplicas: 30, targetCPU: 60 }
+  models:
+    s3Uri: s3://MODELS_BUCKET/registry   # champion/challenger pointers and versions, written by the training job
+    syncSeconds: 30
+  # only the payment gateway and Prometheus may call it
+  allowedFrom:
+    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: payment-gateway } }
+
+rulesService:
+  replicas: 2
+  dbSecret: rules-db           # key: url (postgresql+psycopg://...)
+  tokensSecret: rules-tokens   # key: tokens ("token=name:role,...") from the identity provider integration
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { memory: 512Mi }
+
+caseService:
+  replicas: 2
+  consumerReplicas: 1   # the outbox and resync loop are safe to run twice, but one is enough
+  dbSecret: cases-db
+  tokensSecret: cases-tokens
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { memory: 512Mi }
+
+opsConsole:
+  replicas: 1
+  trinoHost: trino
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits: { memory: 1Gi }
+
+metrics:
+  serviceMonitor: false   # true with the Prometheus operator installed

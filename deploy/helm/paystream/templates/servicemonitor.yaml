@@ -1,0 +1,11 @@
+{{- if .Values.metrics.serviceMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: decision-service
+  labels:
+    {{- include "paystream.labels" . | nindent 4 }}
+spec:
+  selector: { matchLabels: { app: decision-service } }
+  endpoints: [{ port: http, path: /metrics, interval: 15s }]
+{{- end }}

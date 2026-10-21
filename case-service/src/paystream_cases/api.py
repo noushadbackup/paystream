@@ -169,7 +169,9 @@ def effects_from_env():
         import redis
 
         accounts = AccountActions(redis.Redis(host=os.environ["REDIS_HOST"],
-                                              port=int(os.environ.get("REDIS_PORT", "6379"))))
+                                              port=int(os.environ.get("REDIS_PORT", "6379")),
+                                              password=os.environ.get("REDIS_PASSWORD") or None,
+                                              ssl=os.environ.get("REDIS_TLS") == "true"))
     return Effects(labels, accounts)
 
 

@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
+
+
+def kafka_env(environ=None) -> dict:
+    """Client settings from KAFKA_CFG_* variables, the convention every PayStream service shares:
+    KAFKA_CFG_SECURITY_PROTOCOL=SASL_SSL becomes security.protocol. Secrets stay in the environment."""
+    environ = os.environ if environ is None else environ
+    return {k[len("KAFKA_CFG_"):].lower().replace("_", "."): v for k, v in environ.items()
+            if k.startswith("KAFKA_CFG_") and len(k) > len("KAFKA_CFG_")}
 
 
 class KafkaPublisher:
@@ -13,7 +22,7 @@ class KafkaPublisher:
 
         self.topic = topic
         self.producer = Producer({"bootstrap.servers": bootstrap, "enable.idempotence": True, "acks": "all",
-                                  "client.id": "paystream-rules"})
+                                  "client.id": "paystream-rules", **kafka_env()})
 
     def __call__(self, rule: dict) -> None:
         errors: list = []

@@ -10,6 +10,14 @@ from typing import Protocol
 
 from paystream_gen.traffic import Emitted
 
+
+def kafka_env(environ=None) -> dict:
+    """Client settings from KAFKA_CFG_* variables, the convention every PayStream service shares:
+    KAFKA_CFG_SECURITY_PROTOCOL=SASL_SSL becomes security.protocol. Secrets stay in the environment."""
+    environ = os.environ if environ is None else environ
+    return {k[len("KAFKA_CFG_"):].lower().replace("_", "."): v for k, v in environ.items()
+            if k.startswith("KAFKA_CFG_") and len(k) > len("KAFKA_CFG_")}
+
 SCHEMA_DIR = Path(os.environ.get("PAYSTREAM_SCHEMA_DIR", Path(__file__).resolve().parents[3] / "schemas"))
 
 
@@ -51,6 +59,7 @@ class KafkaSink:
             "linger.ms": 20,
             "batch.size": 256 * 1024,
             "compression.type": "lz4",
+            **kafka_env(),
         }
         self._events = SerializingProducer({**common, "value.serializer": AvroSerializer(registry, event_schema)})
         self._labels = SerializingProducer({**common, "value.serializer": AvroSerializer(registry, label_schema)})

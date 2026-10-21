@@ -104,3 +104,31 @@ jobs:
         run: docker compose --profile batch --profile load config -q
       - name: Airflow DAGs compile
         run: python -m py_compile airflow/dags/*.py
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: { version: v3.16.2 }
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.10.5 }
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+      - name: Helm chart lints and renders to valid Kubernetes objects
+        run: |
+          helm lint deploy/helm/paystream --strict
+          helm template paystream deploy/helm/paystream --set metrics.serviceMonitor=true \
+            | kubeconform -strict -summary -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
+      - name: Strimzi and Flink operator manifests match their CRDs
+        run: |
+          kubeconform -strict -summary -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' deploy/k8s
+      - name: Terraform is formatted and valid
+        working-directory: deploy/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate

@@ -13,6 +13,8 @@ import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.runtime.metrics.DescriptiveStatisticsHistogram;
+import redis.clients.jedis.DefaultJedisClientConfig;
+import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.JedisPooled;
 import redis.clients.jedis.Pipeline;
 
@@ -27,20 +29,30 @@ import redis.clients.jedis.Pipeline;
 public class RedisSink implements Sink<RedisWrite> {
     private final String host;
     private final int port;
+    private final boolean tls;
     private final int maxBatch;
     private final long maxDelayMs;
 
-    public RedisSink(String host, int port, int maxBatch, long maxDelayMs) {
+    /** The password, if any, is read from REDIS_PASSWORD on the task manager, never shipped with the job. */
+    public RedisSink(String host, int port, boolean tls, int maxBatch, long maxDelayMs) {
         this.host = host;
         this.port = port;
+        this.tls = tls;
         this.maxBatch = maxBatch;
         this.maxDelayMs = maxDelayMs;
+    }
+
+    public RedisSink(String host, int port, int maxBatch, long maxDelayMs) {
+        this(host, port, false, maxBatch, maxDelayMs);
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public SinkWriter<RedisWrite> createWriter(InitContext ctx) {
-        return new Writer(new JedisPooled(host, port), maxBatch, maxDelayMs,
+        String password = System.getenv("REDIS_PASSWORD");
+        JedisPooled redis = new JedisPooled(new HostAndPort(host, port), DefaultJedisClientConfig.builder()
+                .ssl(tls).password(password == null || password.isEmpty() ? null : password).build());
+        return new Writer(redis, maxBatch, maxDelayMs,
                 ctx.metricGroup().counter("redisWrites"),
                 ctx.metricGroup().histogram("redisFlushMs", new DescriptiveStatisticsHistogram(1024)));
     }

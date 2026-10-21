@@ -146,6 +146,7 @@ def app_from_env() -> FastAPI:
     from paystream_decision.log import KafkaDecisionLog, MemoryDecisionLog
 
     r = aioredis.Redis(host=os.environ.get("REDIS_HOST", "localhost"), port=int(os.environ.get("REDIS_PORT", "6379")),
+                       password=os.environ.get("REDIS_PASSWORD") or None, ssl=os.environ.get("REDIS_TLS") == "true",
                        socket_timeout=0.05, max_connections=int(os.environ.get("REDIS_POOL", "64")))
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP")
     model_dir = os.environ.get("MODEL_REGISTRY")

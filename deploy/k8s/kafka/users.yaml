@@ -1,0 +1,133 @@
+# One SCRAM user per service, allowed only the topics it needs. Strimzi writes each password
+# to a Secret of the same name, which the service's pods mount (see the Helm chart).
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: payment-gateway, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: payments.events, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: flink-payments, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: fraud.alerts, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: topic, name: payments.dlq, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: topic, name: payments.events, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: topic, name: fraud.rules, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: topic, name: fraud.labels, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: topic, name: payments.decisions, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: group, name: paystream-flink, patternType: prefix }
+        operations: [Read]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: flink-ledger-cdc, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: ledger.ledger.transfers, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: topic, name: ledger.ledger.entries, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: group, name: paystream-ledger-cdc, patternType: literal }
+        operations: [Read]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: decision-service, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: payments.decisions, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: rules-service, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: fraud.rules, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: case-service, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: fraud.labels, patternType: literal }
+        operations: [Write, Describe]
+      - resource: { type: topic, name: fraud.alerts, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: topic, name: payments.decisions, patternType: literal }
+        operations: [Read, Describe]
+      - resource: { type: group, name: paystream-cases, patternType: literal }
+        operations: [Read]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: schema-registry, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: _schemas, patternType: literal }
+        operations: [Read, Write, Describe, DescribeConfigs]
+      - resource: { type: group, name: schema-registry, patternType: prefix }
+        operations: [Read]
+      - resource: { type: cluster }
+        operations: [Describe, IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: ledger-connect, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      # Connect's own config, offset and status topics, and the CDC topics Debezium writes
+      - resource: { type: topic, name: connect-, patternType: prefix }
+        operations: [Read, Write, Describe, Create]
+      - resource: { type: topic, name: ledger., patternType: prefix }
+        operations: [Write, Describe, Create]
+      - resource: { type: group, name: paystream-connect, patternType: literal }
+        operations: [Read]
+      - resource: { type: cluster }
+        operations: [IdempotentWrite]

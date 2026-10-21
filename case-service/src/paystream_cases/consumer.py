@@ -12,6 +12,7 @@ import logging
 import time
 from collections.abc import Callable
 
+from paystream_cases.actions import kafka_env
 from paystream_cases.store import CaseStore
 
 log = logging.getLogger("paystream.cases")
@@ -42,7 +43,7 @@ def run(store: CaseStore, bootstrap: str, registry_url: str, effects: Callable[[
     alerts = AvroDeserializer(SchemaRegistryClient({"url": registry_url}))
     consumer = DeserializingConsumer({
         "bootstrap.servers": bootstrap, "group.id": group, "enable.auto.commit": False,
-        "auto.offset.reset": "earliest", "isolation.level": "read_committed",
+        "auto.offset.reset": "earliest", "isolation.level": "read_committed", **kafka_env(),
     })
     consumer.subscribe([ALERTS, DECISIONS])
     pending, last_dispatch, last_resync = 0, 0.0, 0.0

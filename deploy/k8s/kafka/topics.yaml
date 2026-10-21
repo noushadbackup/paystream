@@ -1,0 +1,57 @@
+# The same topics as scripts/create-topics.sh, at production replication.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: payments.events, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  partitions: 48   # keyed by sender: one account's events stay ordered; 48 leaves room to scale Flink
+  replicas: 3
+  config: { retention.ms: 259200000, compression.type: lz4, min.insync.replicas: 2 }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: fraud.alerts, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  partitions: 12
+  replicas: 3
+  config: { retention.ms: 1209600000, min.insync.replicas: 2 }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: fraud.labels, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  partitions: 6
+  replicas: 3
+  config: { retention.ms: -1, min.insync.replicas: 2 }   # ground truth is kept; it is small
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: fraud.rules, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  partitions: 1
+  replicas: 3
+  config: { cleanup.policy: compact, min.compaction.lag.ms: 0, min.insync.replicas: 2 }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: payments.decisions, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  partitions: 24
+  replicas: 3
+  config: { retention.ms: 604800000, compression.type: lz4, min.insync.replicas: 2 }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: payments.dlq, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  partitions: 6
+  replicas: 3
+  config: { retention.ms: 1209600000, min.insync.replicas: 2 }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: schemas, namespace: paystream, labels: { strimzi.io/cluster: paystream } }
+spec:
+  topicName: _schemas   # the schema registry's store: compacted, never deleted
+  partitions: 1
+  replicas: 3
+  config: { cleanup.policy: compact, min.insync.replicas: 2 }

@@ -1,0 +1,88 @@
+{{- $v := .Values.decisionService }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: decision-service
+  labels:
+    app: decision-service
+    {{- include "paystream.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $v.replicas }}
+  selector: { matchLabels: { app: decision-service } }
+  strategy: { rollingUpdate: { maxUnavailable: 0, maxSurge: 25% } }   # never below capacity on the payment path
+  template:
+    metadata:
+      labels: { app: decision-service }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8095" }
+    spec:
+      serviceAccountName: decision-service
+      topologySpreadConstraints:
+        - { maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway,
+            labelSelector: { matchLabels: { app: decision-service } } }
+      containers:
+        - name: api
+          image: {{ include "paystream.image" (dict "root" . "name" "decision-service") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: 8095 }]
+          env:
+            {{- include "paystream.kafkaEnv" (dict "root" . "user" "decision-service") | nindent 12 }}
+            {{- include "paystream.redisEnv" . | nindent 12 }}
+            - { name: WORKERS, value: {{ $v.workers | quote }} }
+            - { name: STORE_TIMEOUT_MS, value: {{ $v.storeTimeoutMs | quote }} }
+            - { name: MODEL_REGISTRY, value: /models }
+            - { name: PROMETHEUS_MULTIPROC_DIR, value: /tmp/prometheus }
+            - { name: HOME, value: /tmp }
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10, failureThreshold: 6 }
+          resources: {{- toYaml $v.resources | nindent 12 }}
+          {{- include "paystream.securityContext" . | nindent 10 }}
+          volumeMounts:
+            - { name: kafka-ca, mountPath: /etc/kafka-ca, readOnly: true }
+            - { name: models, mountPath: /models, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+        # keeps /models in step with the registry bucket; the service re-reads its pointers every 30 s
+        - name: models-sync
+          image: amazon/aws-cli:2.18.0
+          command: ["sh", "-c", "while true; do aws s3 sync --only-show-errors --delete {{ $v.models.s3Uri }} /models; sleep {{ $v.models.syncSeconds }}; done"]
+          resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 128Mi } }
+          {{- include "paystream.securityContext" . | nindent 10 }}
+          env: [{ name: HOME, value: /tmp }]
+          volumeMounts:
+            - { name: models, mountPath: /models }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "paystream.kafkaCaVolume" . | nindent 8 }}
+        - { name: models, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: decision-service
+  labels:
+    app: decision-service
+    {{- include "paystream.labels" . | nindent 4 }}
+spec:
+  selector: { app: decision-service }
+  ports: [{ name: http, port: 8095, targetPort: http }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: decision-service }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: decision-service }
+  minReplicas: {{ $v.autoscaling.minReplicas }}
+  maxReplicas: {{ $v.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ $v.autoscaling.targetCPU }} } }
+  behavior:
+    scaleUp: { stabilizationWindowSeconds: 0 }     # traffic spikes (salary day, Eid) need capacity now
+    scaleDown: { stabilizationWindowSeconds: 600 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: decision-service }
+spec:
+  minAvailable: 2
+  selector: { matchLabels: { app: decision-service } }

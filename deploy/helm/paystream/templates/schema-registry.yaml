@@ -1,0 +1,59 @@
+{{- $v := .Values.schemaRegistry }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  labels:
+    app: schema-registry
+    {{- include "paystream.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $v.replicas }}   # one leader is elected through the _schemas topic; the others forward writes
+  selector: { matchLabels: { app: schema-registry } }
+  template:
+    metadata: { labels: { app: schema-registry } }
+    spec:
+      serviceAccountName: schema-registry
+      containers:
+        - name: registry
+          image: {{ $v.image }}
+          ports: [{ name: http, containerPort: 8081 }]
+          env:
+            - name: SCHEMA_REGISTRY_HOST_NAME
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - { name: SCHEMA_REGISTRY_LISTENERS, value: "http://0.0.0.0:8081" }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS, value: "SASL_SSL://{{ .Values.kafka.bootstrap }}" }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC, value: _schemas }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL, value: SASL_SSL }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM, value: SCRAM-SHA-512 }
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG
+              valueFrom: { secretKeyRef: { name: schema-registry, key: sasl.jaas.config } }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_LOCATION, value: /etc/kafka-ca/ca.p12 }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_TYPE, value: PKCS12 }
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.kafka.caSecret }}, key: ca.password } }
+            # producers may add optional fields; a change that breaks a reader is rejected at registration
+            - { name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL, value: BACKWARD }
+          readinessProbe: { httpGet: { path: /subjects, port: http }, periodSeconds: 10 }
+          resources: { requests: { cpu: 250m, memory: 768Mi }, limits: { memory: 768Mi } }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000   # appuser in the Confluent images
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: kafka-ca, mountPath: /etc/kafka-ca, readOnly: true }
+            - { name: config, mountPath: /etc/schema-registry }   # the image renders its config here at start
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: kafka-ca
+          secret: { secretName: {{ .Values.kafka.caSecret }}, items: [{ key: ca.p12, path: ca.p12 }] }
+        - { name: config, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: schema-registry, labels: { app: schema-registry } }
+spec:
+  selector: { app: schema-registry }
+  ports: [{ name: http, port: 8081, targetPort: http }]

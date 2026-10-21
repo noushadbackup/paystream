@@ -66,6 +66,7 @@ flowchart TB
 | A model in the payment path | LightGBM exported to a JSON tree format the decision service scores in pure Python (~120 µs), checked equal to LightGBM to 1e-9. Champion acts, challenger is scored on the same traffic and logged; promotion needs a paired-bootstrap win on fresh labelled decisions; daily drift check | [`ml/`](ml/src/paystream_ml/registry.py), [`model.py`](decision-service/src/paystream_decision/model.py), [ADR 10](docs/adr/0010-model-trained-on-the-decision-log.md) |
 | Closing the loop | Alerts and held payments become cases, one per account or device, prioritised with SLAs. A verdict labels every alert on the case and freezes the account or lifts its flags within the request; effects go through a transactional outbox, and Redis can be rebuilt from Postgres | [`case-service/`](case-service/src/paystream_cases/store.py), [ADR 9](docs/adr/0009-cases-close-the-loop.md) |
 | Regulatory reporting | Cash Transaction Reports and an STR worklist built in dbt per customer and Dhaka business day; structuring, pass-through and fan-in typologies; thresholds as config; dbt unit tests pin each rule; shareable extracts use salted pseudonyms | [`dbt/models/aml`](dbt/models/aml), [ADR 11](docs/adr/0011-aml-reporting-in-the-lakehouse.md) |
+| Running it for real | Kubernetes with operators: Strimzi Kafka (KRaft, TLS + SCRAM, an ACL per service), Flink jobs upgraded through savepoints with HA and autoscaling, a Helm chart for the services with default-deny network policies; Terraform for AWS (EKS over three zones, S3 under KMS, RDS, ElastiCache with TLS, an IAM role per service account). Schema-checked and validated in CI | [`deploy/`](deploy/README.md), [ADR 12](docs/adr/0012-production-on-kubernetes-with-operators.md) |
 | Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
 | Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI | [`rules/conformance`](rules/conformance) |
 | Money correctness | Integer paisa everywhere; double-entry ledger with a deferred balance check; daily stream vs ledger reconciliation | [`ledger/`](ledger/001_schema.sql), [`recon_stream_vs_ledger`](dbt/models/marts/recon_stream_vs_ledger.sql) |
@@ -103,6 +104,10 @@ UIs: Flink http://localhost:8082 · Grafana http://localhost:3000 · MinIO http:
 Rules API http://localhost:8090/docs · Decision API http://localhost:8095/docs ·
 Case API http://localhost:8097/docs.
 
+**Production.** [`deploy/`](deploy/README.md) has the Kubernetes and AWS version with an install
+runbook: Terraform for the cloud, Strimzi and Flink operator manifests, and a Helm chart.
+`make deploy-check` validates all three; it has not yet been applied to a real AWS account.
+
 ## Tests
 
 `make test` runs all of them; CI runs the same on every push.
@@ -128,6 +133,9 @@ Case API http://localhost:8097/docs.
   LightGBM, metrics match their definitions, a model trained on shuffled labels is refused, promotion
   and rollback, drift flags a shifted population, and the replayed log sees a burst only after the
   pipeline lag.
+* **Deployment** (CI): `helm lint`, every rendered object and every Strimzi and Flink custom
+  resource checked against its schema, `terraform validate`; client TLS/SASL settings are unit-tested
+  in Java and Python.
 * **dbt** (DuckDB in CI, Trino in the stack): unit tests for the AML rules on hand-written rows,
   simulator recall for structuring, uniqueness, accepted values, positive amounts,
   double-entry balance, and closed-day reconciliation.
@@ -155,5 +163,6 @@ airflow/       nightly build and backfill DAGs
 dashboard/     Fraud Ops Console (Streamlit), same SQL on Trino and DuckDB
 monitoring/    Prometheus scrape config, Grafana dashboard
 benchmarks/    measure.py and run_benchmark.sh
+deploy/        Terraform (AWS), Strimzi and Flink operator manifests, Helm chart
 docs/          design doc and ADRs
 ```

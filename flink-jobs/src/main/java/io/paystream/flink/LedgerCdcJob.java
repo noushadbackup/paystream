@@ -2,7 +2,6 @@ package io.paystream.flink;
 
 import io.paystream.flink.sink.IcebergTables;
 import java.time.ZoneOffset;
-import java.util.Map;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.core.execution.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -28,16 +27,10 @@ public final class LedgerCdcJob {
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
         tEnv.getConfig().setLocalTimeZone(ZoneOffset.UTC);
 
-        IcebergTables.createCatalog(tEnv, Map.of(
-                "catalog-type", "rest",
-                "uri", p.get("catalogUri", "http://iceberg-rest:8181"),
-                "warehouse", p.get("warehouse", "s3://warehouse/"),
-                "io-impl", "org.apache.iceberg.aws.s3.S3FileIO",
-                "s3.endpoint", p.get("s3Endpoint", "http://minio:9000"),
-                "s3.path-style-access", "true",
-                "client.region", "us-east-1"));
+        IcebergTables.createCatalog(tEnv, ClientConfig.lakehouse(p));
 
-        String kafka = " WITH ('connector'='kafka', 'properties.bootstrap.servers'='" + bootstrap + "',"
+        String kafka = " WITH ('connector'='kafka', 'properties.bootstrap.servers'='" + bootstrap + "', "
+                + ClientConfig.kafkaSqlOptions(ClientConfig.kafka())
                 + " 'properties.group.id'='paystream-ledger-cdc', 'scan.startup.mode'='earliest-offset',"
                 + " 'format'='debezium-json', 'debezium-json.timestamp-format.standard'='ISO-8601', 'topic'=";
 

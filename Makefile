@@ -3,6 +3,7 @@
 COMPOSE := docker compose
 JAR := /opt/paystream/paystream-flink.jar
 PY ?= python3
+CRDS := 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
 help: ## List targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -78,7 +79,13 @@ demo: ## Fraud Ops Console on generated demo data, no Docker needed
 	cd dbt && $(PY) ci/build_fixture.py && paystream-ml replay --duckdb ci/ci.duckdb && dbt build --profiles-dir . --target duckdb -q
 	cd dashboard && PAYSTREAM_DUCKDB=../dbt/ci/ci.duckdb streamlit run app.py
 
+deploy-check: ## Lint the Helm chart, schema-check the Kubernetes manifests, validate Terraform (needs helm, kubeconform, terraform)
+	helm lint deploy/helm/paystream --strict
+	helm template paystream deploy/helm/paystream | kubeconform -strict -summary -schema-location default -schema-location $(CRDS) -
+	kubeconform -strict -summary -schema-location default -schema-location $(CRDS) deploy/k8s
+	cd deploy/terraform && terraform fmt -check -recursive && terraform init -backend=false -input=false >/dev/null && terraform validate
+
 down: ## Stop everything and delete data volumes
 	$(COMPOSE) --profile batch --profile load down -v
 
-.PHONY: help up up-batch submit load bench chaos verify sql dbt schema-v1 test console demo down rules-demo decide-load
+.PHONY: help up up-batch submit load bench chaos verify sql dbt schema-v1 test console demo down rules-demo decide-load deploy-check

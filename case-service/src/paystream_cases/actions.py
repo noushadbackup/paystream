@@ -15,10 +15,20 @@ Every effect is idempotent: the outbox may apply it more than once.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
 from paystream_cases.store import SUPPRESS_AFTER_FALSE_POSITIVE
+
+
+def kafka_env(environ=None) -> dict:
+    """Client settings from KAFKA_CFG_* variables, the convention every PayStream service shares:
+    KAFKA_CFG_SECURITY_PROTOCOL=SASL_SSL becomes security.protocol. Secrets stay in the environment."""
+    environ = os.environ if environ is None else environ
+    return {k[len("KAFKA_CFG_"):].lower().replace("_", "."): v for k, v in environ.items()
+            if k.startswith("KAFKA_CFG_") and len(k) > len("KAFKA_CFG_")}
+
 
 FREEZE_FIELD = "case-freeze"
 DEFAULT_FREEZE = 30 * 24 * 3600  # seconds; lifted earlier by an approver through the API
@@ -37,6 +47,7 @@ class KafkaLabels:
             "bootstrap.servers": bootstrap, "enable.idempotence": True, "acks": "all",
             "key.serializer": StringSerializer("utf_8"),
             "value.serializer": AvroSerializer(registry, schema_path.read_text()),
+            **kafka_env(),
         })
 
     def __call__(self, labels: list[dict]) -> None:

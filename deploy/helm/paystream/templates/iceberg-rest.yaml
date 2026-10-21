@@ -1,0 +1,42 @@
+{{- $v := .Values.icebergRest }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iceberg-rest
+  labels:
+    app: iceberg-rest
+    {{- include "paystream.labels" . | nindent 4 }}
+spec:
+  replicas: 2   # stateless: the catalog's state is in Postgres, commits are compare-and-swap on the metadata pointer
+  selector: { matchLabels: { app: iceberg-rest } }
+  template:
+    metadata: { labels: { app: iceberg-rest } }
+    spec:
+      serviceAccountName: iceberg-rest
+      containers:
+        - name: catalog
+          image: {{ $v.image }}
+          ports: [{ name: http, containerPort: 8181 }]
+          env:
+            - { name: CATALOG_WAREHOUSE, value: {{ $v.warehouse | quote }} }
+            - { name: CATALOG_IO__IMPL, value: org.apache.iceberg.aws.s3.S3FileIO }
+            - { name: CATALOG_CATALOG__IMPL, value: org.apache.iceberg.jdbc.JdbcCatalog }
+            - name: CATALOG_URI
+              valueFrom: { secretKeyRef: { name: {{ $v.jdbcSecret }}, key: uri } }
+            - name: CATALOG_JDBC_USER
+              valueFrom: { secretKeyRef: { name: {{ $v.jdbcSecret }}, key: username } }
+            - name: CATALOG_JDBC_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $v.jdbcSecret }}, key: password } }
+            - { name: AWS_REGION, value: {{ $v.region | quote }} }
+          readinessProbe: { httpGet: { path: /v1/config, port: http }, periodSeconds: 10 }
+          resources: { requests: { cpu: 250m, memory: 1Gi }, limits: { memory: 1Gi } }
+          {{- include "paystream.securityContext" . | nindent 10 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: iceberg-rest, labels: { app: iceberg-rest } }
+spec:
+  selector: { app: iceberg-rest }
+  ports: [{ name: http, port: 8181, targetPort: http }]

@@ -1,0 +1,54 @@
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: ledger-cdc
+  namespace: paystream
+spec:
+  image: REGISTRY/paystream/flink-jobs:VERSION
+  flinkVersion: v1_20
+  serviceAccount: flink
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "2"
+    execution.checkpointing.interval: 30s
+    execution.checkpointing.dir: s3://CHECKPOINT_BUCKET/ledger-cdc/checkpoints
+    execution.checkpointing.savepoint-dir: s3://CHECKPOINT_BUCKET/ledger-cdc/savepoints
+    fs.s3a.aws.credentials.provider: com.amazonaws.auth.WebIdentityTokenCredentialsProvider
+    high-availability.type: kubernetes
+    high-availability.storageDir: s3://CHECKPOINT_BUCKET/ledger-cdc/ha
+    restart-strategy.type: exponential-delay
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: "9249"
+  jobManager:
+    resource: { cpu: 0.5, memory: 1536m }
+  taskManager:
+    resource: { cpu: 1, memory: 4096m }
+  podTemplate:
+    spec:
+      # the flink node group (deploy/terraform) is tainted for these pods only
+      nodeSelector: { workload: flink }
+      tolerations: [{ key: dedicated, value: flink, effect: NoSchedule }]
+      containers:
+        - name: flink-main-container
+          env:
+            - { name: ENABLE_BUILT_IN_PLUGINS, value: flink-s3-fs-hadoop-1.20.1.jar }
+            - { name: KAFKA_CFG_SECURITY_PROTOCOL, value: SASL_SSL }
+            - { name: KAFKA_CFG_SASL_MECHANISM, value: SCRAM-SHA-512 }
+            - name: KAFKA_CFG_SASL_JAAS_CONFIG
+              valueFrom: { secretKeyRef: { name: flink-ledger-cdc, key: sasl.jaas.config } }
+            - { name: KAFKA_CFG_SSL_TRUSTSTORE_LOCATION, value: /etc/kafka-ca/ca.p12 }
+            - { name: KAFKA_CFG_SSL_TRUSTSTORE_TYPE, value: PKCS12 }
+            - name: KAFKA_CFG_SSL_TRUSTSTORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: paystream-cluster-ca-cert, key: ca.password } }
+          volumeMounts:
+            - { name: kafka-ca, mountPath: /etc/kafka-ca, readOnly: true }
+      volumes:
+        - name: kafka-ca
+          secret: { secretName: paystream-cluster-ca-cert }
+  job:
+    jarURI: local:///opt/paystream/paystream-flink.jar
+    entryClass: io.paystream.flink.LedgerCdcJob
+    args: [--bootstrap, "paystream-kafka-bootstrap:9093", --catalogUri, "http://iceberg-rest:8181",
+           --warehouse, "s3://LAKE_BUCKET/", --s3Endpoint, "", --s3Region, AWS_REGION]
+    parallelism: 2
+    upgradeMode: savepoint
+    state: running

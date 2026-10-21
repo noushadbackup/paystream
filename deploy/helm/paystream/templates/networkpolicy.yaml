@@ -1,0 +1,56 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+# Nothing reaches a pod in this namespace unless a policy below lets it. Strimzi adds its own
+# policies for the Kafka listeners.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny-ingress }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Internal services: reachable from this namespace (services, Flink jobs, Trino, Connect).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: internal }
+spec:
+  podSelector:
+    matchExpressions: [{ key: app, operator: In, values: [schema-registry, iceberg-rest, rules-service, case-api] }]
+  ingress:
+    - from: [{ podSelector: {} }]
+---
+# The decision API is on the payment path: only the gateway calls it, and Prometheus scrapes it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: decision-service }
+spec:
+  podSelector: { matchLabels: { app: decision-service } }
+  ingress:
+    - from: {{- toYaml .Values.decisionService.allowedFrom | nindent 8 }}
+      ports: [{ port: 8095 }]
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ $np.monitoringNamespace }} } } }]
+      ports: [{ port: 8095 }]
+---
+# Analysts: the console and the case API through the ingress controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: analyst-ingress }
+spec:
+  podSelector:
+    matchExpressions: [{ key: app, operator: In, values: [ops-console, case-api] }]
+  ingress:
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ $np.ingressNamespace }} } } }]
+---
+# Flink: the operator drives the JobManager's REST API; TaskManagers talk to the JobManager and each other.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: flink }
+spec:
+  podSelector: { matchLabels: { type: flink-native-kubernetes } }
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ $np.flinkOperatorNamespace }} } }
+        - podSelector: { matchLabels: { type: flink-native-kubernetes } }
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ $np.monitoringNamespace }} } } }]
+      ports: [{ port: 9249 }]
+{{- end }}

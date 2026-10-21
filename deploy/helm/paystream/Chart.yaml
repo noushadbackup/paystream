@@ -1,0 +1,6 @@
+apiVersion: v2
+name: paystream
+description: PayStream services (decision, rules, cases, console) plus the schema registry and Iceberg REST catalog
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

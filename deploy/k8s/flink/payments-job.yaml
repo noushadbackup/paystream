@@ -1,0 +1,90 @@
+# The payments job under the Flink Kubernetes Operator (1.10+). Upgrades take a savepoint and
+# restore from it, so state (dedup, rule history, online features) survives every deploy.
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: payments
+  namespace: paystream
+spec:
+  image: REGISTRY/paystream/flink-jobs:VERSION   # built from flink-jobs/Dockerfile
+  flinkVersion: v1_20
+  serviceAccount: flink   # IAM role (IRSA) for the lake and checkpoint buckets: see deploy/terraform
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "4"
+    state.backend.type: rocksdb
+    state.backend.incremental: "true"
+    state.backend.rocksdb.localdir: /flink-local
+    execution.checkpointing.interval: 10s
+    execution.checkpointing.dir: s3://CHECKPOINT_BUCKET/payments/checkpoints
+    execution.checkpointing.savepoint-dir: s3://CHECKPOINT_BUCKET/payments/savepoints
+    execution.checkpointing.num-retained: "3"
+    fs.s3a.aws.credentials.provider: com.amazonaws.auth.WebIdentityTokenCredentialsProvider
+    high-availability.type: kubernetes
+    high-availability.storageDir: s3://CHECKPOINT_BUCKET/payments/ha
+    restart-strategy.type: exponential-delay
+    kubernetes.operator.savepoint.history.max.count: "10"
+    kubernetes.operator.periodic.savepoint.interval: 6h
+    # scale on backlog: the operator's autoscaler resizes vertices from busy time and Kafka lag
+    job.autoscaler.enabled: "true"
+    job.autoscaler.target.utilization: "0.6"
+    job.autoscaler.metrics.window: 10m
+    job.autoscaler.stabilization.interval: 5m
+    pipeline.max-parallelism: "480"   # a multiple of the 48 Kafka partitions, fixed for the life of the state
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: "9249"
+  jobManager:
+    replicas: 2   # one standby, with Kubernetes HA
+    resource: { cpu: 1, memory: 2048m }
+  taskManager:
+    resource: { cpu: 4, memory: 16384m }
+  podTemplate:
+    spec:
+      # the flink node group (deploy/terraform) is tainted for these pods only
+      nodeSelector: { workload: flink }
+      tolerations: [{ key: dedicated, value: flink, effect: NoSchedule }]
+      containers:
+        - name: flink-main-container
+          env:
+            - { name: ENABLE_BUILT_IN_PLUGINS, value: flink-s3-fs-hadoop-1.20.1.jar }
+            # Kafka over TLS with SCRAM: Strimzi wrote the JAAS line and the cluster CA into these secrets
+            - { name: KAFKA_CFG_SECURITY_PROTOCOL, value: SASL_SSL }
+            - { name: KAFKA_CFG_SASL_MECHANISM, value: SCRAM-SHA-512 }
+            - name: KAFKA_CFG_SASL_JAAS_CONFIG
+              valueFrom: { secretKeyRef: { name: flink-payments, key: sasl.jaas.config } }
+            - { name: KAFKA_CFG_SSL_TRUSTSTORE_LOCATION, value: /etc/kafka-ca/ca.p12 }
+            - { name: KAFKA_CFG_SSL_TRUSTSTORE_TYPE, value: PKCS12 }
+            - name: KAFKA_CFG_SSL_TRUSTSTORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: paystream-cluster-ca-cert, key: ca.password } }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: online-store, key: auth-token } }
+          volumeMounts:
+            - { name: kafka-ca, mountPath: /etc/kafka-ca, readOnly: true }
+            - { name: flink-local, mountPath: /flink-local }
+      volumes:
+        - name: kafka-ca
+          secret: { secretName: paystream-cluster-ca-cert }
+        - name: flink-local   # RocksDB working files on the node's local NVMe
+          emptyDir: {}
+  job:
+    jarURI: local:///opt/paystream/paystream-flink.jar
+    entryClass: io.paystream.flink.PaymentsJob
+    args:
+      - --bootstrap
+      - paystream-kafka-bootstrap:9093
+      - --registry
+      - http://schema-registry:8081
+      - --catalogUri
+      - http://iceberg-rest:8181
+      - --warehouse
+      - s3://LAKE_BUCKET/
+      - --s3Endpoint
+      - ""
+      - --s3Region
+      - AWS_REGION
+      - --redisHost
+      - REDIS_ENDPOINT
+      - --redisTls
+      - "true"
+    parallelism: 16
+    upgradeMode: savepoint
+    state: running

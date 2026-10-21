@@ -1,0 +1,27 @@
+# Values for the upstream Trino chart (https://trinodb.github.io/charts, chart 1.x / Trino 463):
+#   helm install trino trino/trino -n paystream -f deploy/helm/trino-values.yaml
+# Trino reads the lake through the Iceberg REST catalog and S3 with the lake-reader IAM role (IRSA).
+image:
+  tag: "463"
+server:
+  workers: 3
+  autoscaling: { enabled: true, maxReplicas: 10, targetCPUUtilizationPercentage: 60 }
+serviceAccount:
+  create: true
+  name: trino
+  annotations:
+    eks.amazonaws.com/role-arn: LAKE_READER_ROLE_ARN   # terraform output lake_reader_role_arn
+additionalCatalogs:
+  lake: |-
+    connector.name=iceberg
+    iceberg.catalog.type=rest
+    iceberg.rest-catalog.uri=http://iceberg-rest:8181
+    iceberg.rest-catalog.warehouse=s3://LAKE_BUCKET/
+    fs.native-s3.enabled=true
+    s3.region=AWS_REGION
+coordinator:
+  jvm: { maxHeapSize: 6G }
+  resources: { requests: { cpu: "2", memory: 8Gi }, limits: { memory: 8Gi } }
+worker:
+  jvm: { maxHeapSize: 12G }
+  resources: { requests: { cpu: "4", memory: 16Gi }, limits: { memory: 16Gi } }

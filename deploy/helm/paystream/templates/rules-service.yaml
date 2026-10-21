@@ -1,0 +1,44 @@
+{{- $v := .Values.rulesService }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rules-service
+  labels:
+    app: rules-service
+    {{- include "paystream.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $v.replicas }}
+  selector: { matchLabels: { app: rules-service } }
+  template:
+    metadata: { labels: { app: rules-service } }
+    spec:
+      serviceAccountName: rules-service
+      containers:
+        - name: api
+          image: {{ include "paystream.image" (dict "root" . "name" "rules-service") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: 8090 }]
+          env:
+            {{- include "paystream.kafkaEnv" (dict "root" . "user" "rules-service") | nindent 12 }}
+            - name: RULES_DB
+              valueFrom: { secretKeyRef: { name: {{ $v.dbSecret }}, key: url } }
+            - name: PAYSTREAM_RULES_TOKENS
+              valueFrom: { secretKeyRef: { name: {{ $v.tokensSecret }}, key: tokens } }
+            - { name: TRINO_HOST, value: {{ .Values.opsConsole.trinoHost | quote }} }
+            - { name: HOME, value: /tmp }
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
+          resources: {{- toYaml $v.resources | nindent 12 }}
+          {{- include "paystream.securityContext" . | nindent 10 }}
+          volumeMounts:
+            - { name: kafka-ca, mountPath: /etc/kafka-ca, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "paystream.kafkaCaVolume" . | nindent 8 }}
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: rules-service, labels: { app: rules-service } }
+spec:
+  selector: { app: rules-service }
+  ports: [{ name: http, port: 8090, targetPort: http }]

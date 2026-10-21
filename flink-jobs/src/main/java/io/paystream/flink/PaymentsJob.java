@@ -17,7 +17,7 @@ import io.paystream.flink.serde.PaymentEventDeserializer;
 import io.paystream.flink.sink.IcebergTables;
 import java.time.Duration;
 import java.time.ZoneOffset;
-import java.util.Map;
+import java.util.Properties;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.utils.ParameterTool;
@@ -52,6 +52,7 @@ public final class PaymentsJob {
     public static void main(String[] args) throws Exception {
         ParameterTool p = ParameterTool.fromArgs(args);
         String bootstrap = p.get("bootstrap", "kafka:9092");
+        Properties kafka = ClientConfig.kafka();
         HttpSchemaRegistry registry = new HttpSchemaRegistry(p.get("registry", "http://schema-registry:8081"));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -65,6 +66,7 @@ public final class PaymentsJob {
 
         KafkaSource<Envelope> source = KafkaSource.<Envelope>builder()
                 .setBootstrapServers(bootstrap)
+                .setProperties(kafka)
                 .setTopics(p.get("topic", "payments.events"))
                 .setGroupId(p.get("groupId", "paystream-flink"))
                 .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
@@ -80,6 +82,7 @@ public final class PaymentsJob {
         // restore the broadcast state already holds them and the source resumes from its checkpoint.
         KafkaSource<String> rulesSource = KafkaSource.<String>builder()
                 .setBootstrapServers(bootstrap)
+                .setProperties(kafka)
                 .setTopics(p.get("rulesTopic", "fraud.rules"))
                 .setGroupId(p.get("groupId", "paystream-flink") + "-rules")
                 .setStartingOffsets(OffsetsInitializer.earliest())
@@ -95,6 +98,7 @@ public final class PaymentsJob {
 
         out.alerts().sinkTo(KafkaSink.<Alert>builder()
                         .setBootstrapServers(bootstrap)
+                        .setKafkaProducerConfig(kafka)
                         .setRecordSerializer(new AlertSerializer(registry, p.get("alertsTopic", "fraud.alerts")))
                         .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
                         .build())
@@ -104,11 +108,12 @@ public final class PaymentsJob {
         PaymentsPipeline.onlineStore(out, Duration.ofMillis(p.getLong("featureFlushMs", 200)),
                         Duration.ofSeconds(p.getLong("flagTtlS", 3600)))
                 .sinkTo(new RedisSink(p.get("redisHost", "redis"), p.getInt("redisPort", 6379),
-                        p.getInt("redisBatch", 500), p.getLong("redisMaxDelayMs", 50)))
+                        p.getBoolean("redisTls", false), p.getInt("redisBatch", 500), p.getLong("redisMaxDelayMs", 50)))
                 .name("redis-online-store").uid("redis-online-store");
 
         out.dlq().sinkTo(KafkaSink.<Envelope>builder()
                         .setBootstrapServers(bootstrap)
+                        .setKafkaProducerConfig(kafka)
                         .setRecordSerializer(new DeadLetterSerializer(p.get("dlqTopic", "payments.dlq")))
                         .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
                         .build())
@@ -116,14 +121,7 @@ public final class PaymentsJob {
 
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
         tEnv.getConfig().setLocalTimeZone(ZoneOffset.UTC);
-        IcebergTables.createCatalog(tEnv, Map.of(
-                "catalog-type", "rest",
-                "uri", p.get("catalogUri", "http://iceberg-rest:8181"),
-                "warehouse", p.get("warehouse", "s3://warehouse/"),
-                "io-impl", "org.apache.iceberg.aws.s3.S3FileIO",
-                "s3.endpoint", p.get("s3Endpoint", "http://minio:9000"),
-                "s3.path-style-access", "true",
-                "client.region", "us-east-1"));
+        IcebergTables.createCatalog(tEnv, ClientConfig.lakehouse(p));
         StreamStatementSet set = tEnv.createStatementSet();
         IcebergTables.insertAll(tEnv, set, out);
 
@@ -131,6 +129,7 @@ public final class PaymentsJob {
         // so a backtest can report precision. It never feeds the rules.
         KafkaSource<Label> labelsSource = KafkaSource.<Label>builder()
                 .setBootstrapServers(bootstrap)
+                .setProperties(kafka)
                 .setTopics(p.get("labelsTopic", "fraud.labels"))
                 .setGroupId(p.get("groupId", "paystream-flink") + "-labels")
                 .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
@@ -143,6 +142,7 @@ public final class PaymentsJob {
         // declined customer, and model training data that matches what the model is served.
         KafkaSource<DecisionRecord> decisionsSource = KafkaSource.<DecisionRecord>builder()
                 .setBootstrapServers(bootstrap)
+                .setProperties(kafka)
                 .setTopics(p.get("decisionsTopic", "payments.decisions"))
                 .setGroupId(p.get("groupId", "paystream-flink") + "-decisions")
                 .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))

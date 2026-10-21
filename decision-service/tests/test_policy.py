@@ -82,3 +82,10 @@ def test_degraded_mode_fails_open_only_for_small_payments():
     assert decide(P, small, None, {}, NOW).outcome == "APPROVE"
     assert decide(P, big, None, {}, NOW).outcome == "REVIEW"
     assert decide(P, req(amount_paisa=3_000_000), None, {}, NOW).outcome == "DECLINE"  # limits need no history
+
+
+def test_kafka_settings_come_from_the_environment():
+    from paystream_decision.log import kafka_env
+
+    env = {"KAFKA_CFG_SECURITY_PROTOCOL": "SASL_SSL", "KAFKA_CFG_SASL_PASSWORD": "x", "KAFKA_CFG_": "", "HOME": "/"}
+    assert kafka_env(env) == {"security.protocol": "SASL_SSL", "sasl.password": "x"}

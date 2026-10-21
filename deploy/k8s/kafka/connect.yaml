@@ -1,0 +1,91 @@
+# Ledger CDC: Debezium on a Strimzi-managed Kafka Connect cluster. Strimzi builds the image with the
+# connector plugin; the database password is read from a Kubernetes Secret at runtime through a
+# config provider, so it never appears in the connector config.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: ledger-connect
+  namespace: paystream
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: 3.8.0
+  replicas: 2
+  bootstrapServers: paystream-kafka-bootstrap:9093
+  tls:
+    trustedCertificates:
+      - { secretName: paystream-cluster-ca-cert, pattern: "*.crt" }
+  authentication:
+    type: scram-sha-512
+    username: ledger-connect
+    passwordSecret: { secretName: ledger-connect, password: password }
+  config:
+    group.id: paystream-connect
+    config.storage.topic: connect-configs
+    offset.storage.topic: connect-offsets
+    status.storage.topic: connect-status
+    config.storage.replication.factor: 3
+    offset.storage.replication.factor: 3
+    status.storage.replication.factor: 3
+    config.providers: secrets
+    config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
+  build:
+    output:
+      type: docker
+      image: REGISTRY/paystream/ledger-connect:2.7.3   # set to your registry
+    plugins:
+      - name: debezium-postgres
+        artifacts:
+          - type: tgz
+            url: https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/2.7.3.Final/debezium-connector-postgres-2.7.3.Final-plugin.tar.gz
+  resources:
+    requests: { cpu: 500m, memory: 2Gi }
+    limits: { memory: 2Gi }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: ledger
+  namespace: paystream
+  labels: { strimzi.io/cluster: ledger-connect }
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1   # one replication slot: Postgres logical decoding is single-stream
+  config:
+    plugin.name: pgoutput
+    publication.name: paystream_ledger
+    publication.autocreate.mode: disabled
+    slot.name: paystream_ledger
+    database.hostname: ${secrets:paystream/ledger-db:host}
+    database.port: "5432"
+    database.user: ${secrets:paystream/ledger-db:username}
+    database.password: ${secrets:paystream/ledger-db:password}
+    database.dbname: paystream
+    database.sslmode: require
+    topic.prefix: ledger
+    table.include.list: ledger.transfers,ledger.entries
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: "false"
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: "false"
+    decimal.handling.mode: precise
+    topic.creation.default.replication.factor: "3"
+    topic.creation.default.partitions: "6"
+    heartbeat.interval.ms: "10000"
+---
+# Connect reads the database secret through the Kubernetes API: allow exactly that one secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: ledger-connect-secrets, namespace: paystream }
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [ledger-db]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: ledger-connect-secrets, namespace: paystream }
+subjects:
+  - { kind: ServiceAccount, name: ledger-connect-connect, namespace: paystream }
+roleRef: { kind: Role, name: ledger-connect-secrets, apiGroup: rbac.authorization.k8s.io }
