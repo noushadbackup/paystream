@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from redis.exceptions import RedisError
 
 from paystream_decision import features as feat
-from paystream_decision.policy import Policy, decide
+from paystream_decision.policy import Policy, decide, live_flags
 from paystream_decision.store import OnlineStore
 
 LATENCY = Histogram("decision_latency_seconds", "Time to decide, server side",
@@ -122,7 +122,7 @@ def create_app(redis, log, policy: Policy | None = None, store_timeout_s: float 
         }
         log({**result, "decided_at": int(time.time() * 1000), "event_time": now,
              "request": {k: v for k, v in req.items() if not k.startswith("_")},
-             "features": f, "flags": sorted({r for fl in flags.values() for r in fl})})
+             "features": f, "flags": sorted({r for fl in flags.values() for r in live_flags(fl, now)})})
         return result
 
     return app

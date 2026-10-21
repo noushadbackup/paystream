@@ -48,3 +48,12 @@ def test_alert_v2_reader_reads_v1_alerts():
     buf.seek(0)
     [r] = list(fastavro.reader(buf, reader_schema=v2))
     assert r["rule"] == "VELOCITY" and r["rule_id"] is None and r["shadow"] is False and r["action"] == "REVIEW"
+
+
+def test_label_v2_reader_reads_v1_labels_as_simulator_fraud():
+    v1, v2 = load("history/fraud_label.v1.avsc"), load("fraud_label.avsc")
+    buf = io.BytesIO()
+    fastavro.writer(buf, v1, [{"txn_id": "T1", "scenario": "mule_ring", "account_id": "U1"}])
+    buf.seek(0)
+    [r] = list(fastavro.reader(buf, reader_schema=v2))
+    assert (r["source"], r["disposition"], r["case_id"]) == ("simulator", "FRAUD", None)

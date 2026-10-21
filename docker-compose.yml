@@ -243,6 +243,32 @@ services:
       interval: 5s
       retries: 24
 
+  case-service:
+    build: { context: ., dockerfile: case-service/Dockerfile }
+    ports: ["8097:8097"]
+    depends_on:
+      kafka: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment: &case-env
+      KAFKA_BOOTSTRAP: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      REDIS_HOST: redis
+      CASES_DB: postgresql+psycopg://paystream:paystream@postgres:5432/paystream
+      # Local demo identities only, as for the rules service.
+      PAYSTREAM_CASES_TOKENS: dev-analyst=ayesha:analyst,dev-lead=rahim:lead
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8097/healthz')"]
+      interval: 5s
+      retries: 24
+
+  case-consumer:
+    build: { context: ., dockerfile: case-service/Dockerfile }
+    command: ["paystream-cases", "consume"]
+    depends_on:
+      case-service: { condition: service_healthy }
+    environment: *case-env
+
   rules-service:
     build: { context: ., dockerfile: rules-service/Dockerfile }
     ports: ["8090:8090"]
@@ -263,9 +289,11 @@ services:
   ops-console:
     build: { context: dashboard }
     ports: ["8501:8501"]
-    depends_on: [trino]
+    depends_on: [trino, case-service]
     environment:
       TRINO_HOST: trino
+      CASES_URL: http://case-service:8097
+      PAYSTREAM_CASES_TOKEN: dev-analyst
 
   generator:
     build: { context: ., dockerfile: generator/Dockerfile }

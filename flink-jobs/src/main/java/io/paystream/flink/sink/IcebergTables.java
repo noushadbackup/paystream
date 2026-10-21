@@ -60,8 +60,10 @@ public final class IcebergTables {
                 + " amount_paisa BIGINT, features STRING, flags STRING, decision_date DATE"
                 + ") PARTITIONED BY (decision_date)" + v2);
         tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.silver.fraud_labels ("
-                + "txn_id STRING, scenario STRING, account_id STRING, labelled_at TIMESTAMP_LTZ(3), label_date DATE"
+                + "txn_id STRING, scenario STRING, account_id STRING, source STRING, disposition STRING,"
+                + " case_id STRING, labelled_by STRING, labelled_at TIMESTAMP_LTZ(3), label_date DATE"
                 + ") PARTITIONED BY (label_date)" + v2);
+        addMissingColumns(tEnv, "silver", "fraud_labels", LABEL_COLUMNS_V2);
         tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.gold.kpi_minute ("
                 + "window_start TIMESTAMP_LTZ(3), txn_type STRING, txn_count BIGINT, success_count BIGINT,"
                 + " failed_count BIGINT, success_amount_paisa BIGINT, event_date DATE)"
@@ -101,8 +103,10 @@ public final class IcebergTables {
     /** Labels go in through the same statement set, so they commit on the same checkpoints. */
     public static void insertLabels(StreamTableEnvironment tEnv, StreamStatementSet set, DataStream<Label> labels) {
         tEnv.createTemporaryView("v_labels", labels);
-        set.addInsertSql("INSERT INTO lake.silver.fraud_labels SELECT txnId, scenario, accountId,"
-                + " TO_TIMESTAMP_LTZ(labelledAt, 3), CAST(TO_TIMESTAMP_LTZ(labelledAt, 3) AS DATE) FROM v_labels");
+        set.addInsertSql("INSERT INTO lake.silver.fraud_labels (txn_id, scenario, account_id, source, disposition,"
+                + " case_id, labelled_by, labelled_at, label_date) SELECT txnId, scenario, accountId, source, disposition,"
+                + " caseId, labelledBy, TO_TIMESTAMP_LTZ(labelledAt, 3), CAST(TO_TIMESTAMP_LTZ(labelledAt, 3) AS DATE)"
+                + " FROM v_labels");
     }
 
     public static void insertDecisions(StreamTableEnvironment tEnv, StreamStatementSet set,
@@ -116,6 +120,16 @@ public final class IcebergTables {
 
     /** Columns added to silver.fraud_alerts in v2 (analyst rules), for tables created before them. */
     private static final Map<String, Type> ALERT_COLUMNS_V2 = new LinkedHashMap<>();
+
+    /** Columns added to silver.fraud_labels in v2 (analyst case decisions). */
+    private static final Map<String, Type> LABEL_COLUMNS_V2 = new LinkedHashMap<>();
+
+    static {
+        LABEL_COLUMNS_V2.put("source", Types.StringType.get());
+        LABEL_COLUMNS_V2.put("disposition", Types.StringType.get());
+        LABEL_COLUMNS_V2.put("case_id", Types.StringType.get());
+        LABEL_COLUMNS_V2.put("labelled_by", Types.StringType.get());
+    }
 
     static {
         ALERT_COLUMNS_V2.put("rule_id", Types.StringType.get());

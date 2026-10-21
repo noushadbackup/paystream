@@ -1,0 +1,11 @@
+{
+  "type": "record",
+  "name": "FraudLabel",
+  "namespace": "io.paystream.avro",
+  "doc": "Ground truth from the generator, used only to measure rule recall and precision. Never read by the fraud rules.",
+  "fields": [
+    {"name": "txn_id", "type": "string"},
+    {"name": "scenario", "type": "string"},
+    {"name": "account_id", "type": "string"}
+  ]
+}

@@ -2,10 +2,14 @@
   "type": "record",
   "name": "FraudLabel",
   "namespace": "io.paystream.avro",
-  "doc": "Ground truth from the generator, used only to measure rule recall and precision. Never read by the fraud rules.",
+  "doc": "Ground truth about a transaction: from the simulator (benchmarks), or from an analyst closing a case. Used to measure rules and train models; never read by the rules themselves.",
   "fields": [
     {"name": "txn_id", "type": "string"},
-    {"name": "scenario", "type": "string"},
-    {"name": "account_id", "type": "string"}
+    {"name": "scenario", "type": "string", "doc": "Fraud pattern (simulator) or the rule that raised the alert (analyst)."},
+    {"name": "account_id", "type": "string", "doc": "The account or device the label is about."},
+    {"name": "source", "type": "string", "default": "simulator", "doc": "simulator | analyst (v2)"},
+    {"name": "disposition", "type": "string", "default": "FRAUD", "doc": "FRAUD or NOT_FRAUD: analysts also record false positives (v2)."},
+    {"name": "case_id", "type": ["null", "string"], "default": null, "doc": "The case that produced an analyst label (v2)."},
+    {"name": "labelled_by", "type": ["null", "string"], "default": null, "doc": "Analyst who decided (v2)."}
   ]
 }

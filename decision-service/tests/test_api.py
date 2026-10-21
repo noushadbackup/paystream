@@ -41,6 +41,16 @@ def test_decision_reads_flink_state_and_logs_what_it_saw(redis, log):
     assert record["flags"] == ["MULE_FAN_IN"] and record["request"]["txn_id"] == "T1"
 
 
+def test_an_account_frozen_by_a_case_is_declined(redis, log):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(redis.hset("case:U1", "case-freeze",
+                                       orjson.dumps({"action": "DECLINE", "until": NOW + 86_400_000})))
+    with TestClient(create_app(redis, log)) as c:
+        r = c.post("/v1/decisions", json=body()).json()
+    assert r["outcome"] == "DECLINE" and r["reasons"] == ["FLAG_SENDER:case-freeze"]
+    assert log[0]["flags"] == ["case-freeze"]
+
+
 def test_slow_store_degrades_instead_of_blocking_the_payment(log):
     class Slow:
         def pipeline(self, transaction=False):

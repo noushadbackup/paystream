@@ -40,6 +40,10 @@ public class LabelDeserializer implements KafkaRecordDeserializationSchema<Label
             l.txnId = f.getTxnId();
             l.scenario = f.getScenario();
             l.accountId = f.getAccountId();
+            l.source = f.getSource();
+            l.disposition = f.getDisposition();
+            l.caseId = f.getCaseId();
+            l.labelledBy = f.getLabelledBy();
             l.labelledAt = record.timestamp();
             out.collect(l);
         } catch (RuntimeException | IOException e) {

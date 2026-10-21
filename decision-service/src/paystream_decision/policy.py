@@ -48,8 +48,11 @@ class Decision:
 
 
 def live_flags(flags: dict[str, dict], now_ms: int | None = None) -> dict[str, dict]:
+    """Unexpired flags, minus rules an analyst cleared for this entity (an ``ALLOW:<rule>`` entry)."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    return {rule: f for rule, f in flags.items() if f.get("until", 0) > now_ms}
+    live = {rule: f for rule, f in flags.items() if f.get("until", 0) > now_ms}
+    allowed = {rule.removeprefix("ALLOW:") for rule, f in live.items() if f.get("action") == "ALLOW"}
+    return {rule: f for rule, f in live.items() if f.get("action") != "ALLOW" and rule not in allowed}
 
 
 def decide(p: Policy, req: dict, f: dict | None, flags: dict[str, dict[str, dict]], now_ms: int) -> Decision:

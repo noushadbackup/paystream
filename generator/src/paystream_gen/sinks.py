@@ -67,7 +67,9 @@ class KafkaSink:
         self._events.poll(0)
         if e.scenario and not e.is_duplicate:
             self._labels.produce(self._labels_topic, key=ev["txn_id"],
-                                 value={"txn_id": ev["txn_id"], "scenario": e.scenario, "account_id": e.subject})
+                                 value={"txn_id": ev["txn_id"], "scenario": e.scenario, "account_id": e.subject,
+                                        "source": "simulator", "disposition": "FRAUD", "case_id": None,
+                                        "labelled_by": None})
             self._labels.poll(0)
 
     def close(self) -> None:

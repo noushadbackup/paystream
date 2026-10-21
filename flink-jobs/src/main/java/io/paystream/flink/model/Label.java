@@ -5,6 +5,12 @@ public class Label {
     public String txnId;
     public String scenario;
     public String accountId;
+    /** simulator or analyst. */
+    public String source;
+    /** FRAUD or NOT_FRAUD. */
+    public String disposition;
+    public String caseId;
+    public String labelledBy;
     /** Kafka timestamp: when the label became known. */
     public long labelledAt;
 

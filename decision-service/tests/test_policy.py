@@ -50,6 +50,19 @@ def test_a_decline_flag_from_streaming_detection_blocks_the_next_payment():
     assert decide(P, req(), feats(req()), expired, NOW).outcome == "APPROVE"
 
 
+def test_analyst_freeze_blocks_and_a_cleared_rule_no_longer_flags():
+    frozen = {"sender": {"case-freeze": {"action": "DECLINE", "until": NOW + 1000, "case_id": "C-1"}}}
+    assert decide(P, req(), feats(req()), frozen, NOW).reasons == ["FLAG_SENDER:case-freeze"]
+    # Flink re-flags the same rule after an analyst cleared it: the clearance wins until it expires
+    cleared = {"sender": {"failed-pin-burst": {"action": "DECLINE", "until": NOW + 1000},
+                          "ALLOW:failed-pin-burst": {"action": "ALLOW", "until": NOW + 5000}}}
+    assert decide(P, req(), feats(req()), cleared, NOW).outcome == "APPROVE"
+    assert decide(P, req(), feats(req()), cleared, NOW + 6000).outcome == "APPROVE"  # flag expired too
+    lapsed = {"sender": {"failed-pin-burst": {"action": "DECLINE", "until": NOW + 9000},
+                         "ALLOW:failed-pin-burst": {"action": "ALLOW", "until": NOW + 5000}}}
+    assert decide(P, req(), feats(req()), lapsed, NOW + 6000).outcome == "DECLINE"
+
+
 def test_new_device_high_value_is_challenged_but_no_history_is_not_new():
     r = req(amount_paisa=1_500_000)
     assert decide(P, r, feats(r, known=False), {}, NOW).reasons == ["NEW_DEVICE_HIGH_VALUE"]

@@ -42,7 +42,7 @@ PAYMENTS_SQL = f"""SELECT {", ".join(COLUMNS)} FROM silver.payments
 WHERE ingest_time >= ? AND ingest_time < ? ORDER BY ingest_time, txn_id"""
 LABELS_SQL = """SELECT DISTINCT l.scenario, l.account_id FROM silver.fraud_labels l
 JOIN silver.payments p ON p.txn_id = l.txn_id
-WHERE p.ingest_time >= ? AND p.ingest_time < ?"""
+WHERE p.ingest_time >= ? AND p.ingest_time < ? AND coalesce(l.disposition, 'FRAUD') = 'FRAUD'"""
 
 
 @dataclass

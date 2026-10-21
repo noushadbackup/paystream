@@ -98,6 +98,9 @@ class PipelineIcebergIT {
         label.scenario = "device_farm";
         label.accountId = "D_FARM";
         label.labelledAt = T0;
+        label.source = "analyst";
+        label.disposition = "FRAUD";
+        label.caseId = "C1";
         IcebergTables.insertLabels(tEnv, set, env.fromData(label));
         set.attachAsDataStream();
         env.execute("pipeline-it");

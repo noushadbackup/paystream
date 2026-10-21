@@ -10,6 +10,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+import cases as cs
 import queries as q
 
 BUILT_IN = ["VELOCITY", "MULE_FAN_IN", "NEW_DEVICE_CASH_OUT", "AGENT_FLOAT_SPIKE"]
@@ -33,6 +34,13 @@ def backend() -> q.Backend:
 
 
 b = backend()
+
+
+@st.cache_resource
+def case_backend():
+    return cs.cases_from_env(b, q.anchor(b))
+
+
 RULES = BUILT_IN + [r for r in q.rule_names(b) if r not in BUILT_IN]
 RULE_COLORS = alt.Scale(domain=RULES, range=PALETTE[: len(RULES)])
 
@@ -109,7 +117,7 @@ def live() -> None:
         )
 
 
-live_tab, rules_tab = st.tabs(["Live", "Rules"])
+live_tab, cases_tab, rules_tab = st.tabs(["Live", "Cases", "Rules"])
 with live_tab:
     live()
     st.divider()
@@ -129,6 +137,57 @@ with live_tab:
         st.subheader("Agents running low on float")
         st.caption("Net e-money change today: cash-in spends float, cash-out earns it back.")
         st.dataframe(q.agent_float(b), hide_index=True)
+
+with cases_tab:
+    cases = case_backend()
+    if cases is None:
+        st.info("Case management needs the case service (`make up`) or, for the demo, `pip install -e case-service`.")
+    else:
+        now_c = q.anchor(b) if isinstance(cases, cs.DemoCases) else pd.Timestamp.now(tz="UTC").to_pydatetime()
+        s = cases.stats()
+        st.caption(f"Source: {cases.name}. Alerts on the same account or device join one case; priority sets the "
+                   "SLA (P1 15 min, P2 2 h, P3 24 h). A verdict labels every alert on the case and acts on the "
+                   "account within the same request.")
+        m = st.columns(6)
+        m[0].metric("Open cases", f"{s['open']:,}")
+        m[1].metric("P1 · 15 min", s["open_by_priority"].get(1, s["open_by_priority"].get("1", 0)))
+        m[2].metric("P2 · 2 h", s["open_by_priority"].get(2, s["open_by_priority"].get("2", 0)))
+        m[3].metric("SLA breached", s["sla_breached"])
+        m[4].metric("Suppressed", s["alerts_suppressed"], help="Alerts not re-queued because an analyst cleared "
+                    "the same rule on the same subject in the last 72 h")
+        m[5].metric("Effects pending", s["effects_pending"])
+
+        work, queue_col = st.columns([2, 3])
+        with work:
+            st.subheader("Work a case")
+            analyst = st.text_input("Analyst", value="ayesha")
+            if st.button("Claim next case", type="primary"):
+                claimed = cases.claim(analyst)
+                st.session_state["case_id"] = claimed["case_id"] if claimed else None
+                if not claimed:
+                    st.success("The queue is empty.")
+            if case_id := st.session_state.get("case_id"):
+                c = cases.case(case_id)
+                st.markdown(f"**{c['case_id']}** · P{c['priority']} · subject `{c['subject_id']}` · {c['status']}")
+                st.dataframe(pd.DataFrame(c["alerts"])[["rule", "trigger_txn_id", "score", "action", "details"]],
+                             hide_index=True)
+                if c["status"] != "CLOSED":
+                    with st.form("close"):
+                        verdict = st.radio("Verdict", cs.VERDICTS, horizontal=True)
+                        note = st.text_input("Note")
+                        if st.form_submit_button("Close case"):
+                            r = cases.close(analyst, case_id, verdict, note)
+                            st.success(f"{r['verdict']}: {r['labels']} label(s) sent"
+                                       + (", account frozen" if r["frozen"] else "")
+                                       + (", flags lifted and rule allowed for 72 h" if r["cleared"] else ""))
+                with st.expander("History"):
+                    st.dataframe(pd.DataFrame(c["history"])[["at", "actor", "kind", "detail"]], hide_index=True)
+        with queue_col:
+            st.subheader("Queue")
+            st.dataframe(cs.queue_frame(cases.queue(100), now_c), hide_index=True, height=480,
+                         column_config={"max_score": st.column_config.NumberColumn("Score", format="%.2f"),
+                                        "sla_left_min": st.column_config.NumberColumn("SLA left (min)"),
+                                        "subject_id": "Subject"})
 
 with rules_tab:
     st.subheader("Rule performance")

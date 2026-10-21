@@ -20,6 +20,7 @@ flowchart TB
     rules[Rules service<br/>versioned rules · maker-checker<br/>backtest · audit log]
     redis[(Redis online store<br/>feature buckets · risk flags)]
     decide[Decision API<br/>approve · challenge · review · decline]
+    cases[Case service<br/>queue · SLA · verdicts<br/>freeze · clear · labels]
     gw[Payment gateway]
     alerts[[fraud.alerts]]
     dlq[[payments.dlq]]
@@ -33,6 +34,9 @@ flowchart TB
     gw -->|before authorising| decide
     redis --> decide
     decide -->|payments.decisions| kafka
+    alerts --> cases
+    cases -->|freeze, clear| redis
+    cases -->|fraud.labels| kafka
     lake -.backtest.-> rules
     gen -->|payments.events| kafka
     gen --> pg --> dbz --> kafka
@@ -59,12 +63,16 @@ flowchart TB
 | New fraud patterns without a deploy | Analysts write rules as JSON; Flink loads them through broadcast state and changes behaviour mid-stream, keeping state across restarts. New rules run in shadow first | [`DynamicRuleEvaluator`](flink-jobs/src/main/java/io/paystream/flink/rules/dynamic/DynamicRuleEvaluator.java), [`rules/library`](rules/library) |
 | Stopping fraud before money moves | The gateway asks the decision API before authorising. One pipelined Redis read of the feature buckets and risk flags Flink maintains; limits, flags from streaming rules, step-up on new devices, shared devices, mule fan-in; fails open only for small amounts when Redis is slow | [`decision-service/`](decision-service/src/paystream_decision/policy.py), [`OnlineFeatures`](flink-jobs/src/main/java/io/paystream/flink/online/OnlineFeatures.java), [ADR 8](docs/adr/0008-inline-decisions-from-streaming-state.md) |
 | Training data without skew | Every decision is logged with the exact features it used and lands in `silver.decisions` | [`log.py`](decision-service/src/paystream_decision/log.py) |
+| Closing the loop | Alerts and held payments become cases, one per account or device, prioritised with SLAs. A verdict labels every alert on the case and freezes the account or lifts its flags within the request; effects go through a transactional outbox, and Redis can be rebuilt from Postgres | [`case-service/`](case-service/src/paystream_cases/store.py), [ADR 9](docs/adr/0009-cases-close-the-loop.md) |
 | Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
 | Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI | [`rules/conformance`](rules/conformance) |
 | Money correctness | Integer paisa everywhere; double-entry ledger with a deferred balance check; daily stream vs ledger reconciliation | [`ledger/`](ledger/001_schema.sql), [`recon_stream_vs_ledger`](dbt/models/marts/recon_stream_vs_ledger.sql) |
 | Reprocessing | Bronze keeps every record as received; Airflow rebuilds a day of silver from bronze, then gold | [`paystream_backfill`](airflow/dags/paystream_backfill.py) |
 | Operating it | Grafana: throughput, consumer lag, alert latency, checkpoints, watermark lag | [`monitoring/`](monitoring) |
-| Acting on it | Fraud Ops Console: live alert feed, alerts and payments per minute, reconciliation status, agents low on float, account lookup | [`dashboard/`](dashboard/app.py) |
+| Acting on it | Fraud Ops Console: live alert feed, the case queue with claim and close, alerts and payments per minute, rule performance, reconciliation status, agents low on float, account lookup | [`dashboard/`](dashboard/app.py) |
+
+![Cases tab](docs/img/cases.png)
+<sub>The Cases tab: the analyst claims the most urgent case and closes it with a verdict. In the demo the real case store runs in process on the fixture's alerts.</sub>
 
 Design and tradeoffs: [docs/design.md](docs/design.md) and the [ADRs](docs/adr).
 
@@ -89,7 +97,8 @@ make down
 ```
 
 UIs: Flink http://localhost:8082 · Grafana http://localhost:3000 · MinIO http://localhost:9001 ·
-Rules API http://localhost:8090/docs · Decision API http://localhost:8095/docs.
+Rules API http://localhost:8090/docs · Decision API http://localhost:8095/docs ·
+Case API http://localhost:8097/docs.
 
 ## Tests
 
@@ -105,6 +114,10 @@ Rules API http://localhost:8090/docs · Decision API http://localhost:8095/docs.
 * **Rules service** (pytest): draft, submit, approve and reject; the author cannot approve; a failed
   publish leaves nothing live; the kill switch; tampering with the audit log is detected; the HTTP API
   with roles; and the conformance vectors, which the Flink tests also run.
+* **Case service** (pytest, against a real Redis in CI): alerts on one subject share a case, replays
+  are ignored, escalation tightens the SLA, two analysts never claim the same case, verdicts produce
+  labels, a freeze is enforced by the decision service, a false positive lifts flags and suppresses the
+  rule, effects retry in order after a failure, and Redis is rebuilt from Postgres after losing everything.
 * **Decision service** (pytest): feature windows evaluated at decision time, limits, flags and their
   expiry, step-up on new devices, degraded mode under a slow store, and the decision-log contract
   that Flink parses (also tested on the Java side). The Redis sink is tested against a real Redis.
@@ -125,6 +138,7 @@ flink-jobs/    Java: PaymentsJob (stream core, built-in detectors, analyst-rule 
 rules/         analyst rule contract (JSON Schema), starter library, conformance vectors
 rules-service/ Python: rule lifecycle API, maker-checker, audit log, backtester
 decision-service/ Python: inline decision API, policy, decision log, load tester
+case-service/  Python: case queue and SLAs, verdicts to labels and account actions, outbox
 ledger/        Postgres double-entry ledger schema
 connect/       Debezium connector config
 dbt/           staging + gold models on Trino; DuckDB target for CI

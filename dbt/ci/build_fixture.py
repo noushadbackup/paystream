@@ -91,7 +91,7 @@ def main() -> None:
             entries.append((ev["txn_id"], "D", ev["sender_id"], -ev["amount_paisa"], posted))
             entries.append((ev["txn_id"], "C", ev["receiver_id"], ev["amount_paisa"], posted))
         if e.scenario and not e.is_duplicate:
-            labels.append((ev["txn_id"], e.scenario, e.subject, ts(e.arrival_ms)))
+            labels.append((ev["txn_id"], e.scenario, e.subject, "simulator", "FRAUD", None, None, ts(e.arrival_ms)))
         if e.scenario in RULES and not e.is_duplicate:
             # one alert per incident, raised where the Flink rule would fire (see RuleConfig)
             key = (e.scenario, e.subject)
@@ -121,7 +121,7 @@ def main() -> None:
         score double, details varchar, rule_id varchar, rule_version integer, shadow boolean, action varchar)""")
     insert(con, "silver.fraud_alerts", alerts)
     con.execute("""create or replace table silver.fraud_labels (txn_id varchar, scenario varchar, account_id varchar,
-        labelled_at timestamptz)""")
+        source varchar, disposition varchar, case_id varchar, labelled_by varchar, labelled_at timestamptz)""")
     insert(con, "silver.fraud_labels", labels)
     print(f"fixture: {len(payments)} payments ({leaked} leaked retries), {len(transfers)} transfers, "
           f"{len(alerts)} alerts, {len(labels)} labels -> {a.out}")
