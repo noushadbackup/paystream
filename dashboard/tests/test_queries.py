@@ -67,3 +67,12 @@ def test_rule_performance(b):
     perf = q.rule_performance(b).set_index("rule")
     assert perf.loc["failed-pin-burst", "precision_vs_labels"] > 0.9
     assert perf["alerts"].sum() == b.df("SELECT count(*) AS n FROM silver.fraud_alerts")["n"].iloc[0]
+
+
+def test_aml_views(b):
+    s = q.aml_summary(b)
+    assert {"PASS_THROUGH", "FAN_IN"} <= set(s["typologies"]["typology"])
+    assert s["ctr_reports"] >= 0
+    worklist = q.str_candidates(b)
+    assert not worklist.empty and worklist["customer_id"].is_unique
+    assert list(worklist["typology_count"]) == sorted(worklist["typology_count"], reverse=True)

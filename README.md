@@ -65,12 +65,13 @@ flowchart TB
 | Training data without skew | Every decision is logged with the exact features it used and lands in `silver.decisions`; the model trains on that log joined to case labels, never on recomputed features | [`log.py`](decision-service/src/paystream_decision/log.py), [`dataset.py`](ml/src/paystream_ml/dataset.py) |
 | A model in the payment path | LightGBM exported to a JSON tree format the decision service scores in pure Python (~120 µs), checked equal to LightGBM to 1e-9. Champion acts, challenger is scored on the same traffic and logged; promotion needs a paired-bootstrap win on fresh labelled decisions; daily drift check | [`ml/`](ml/src/paystream_ml/registry.py), [`model.py`](decision-service/src/paystream_decision/model.py), [ADR 10](docs/adr/0010-model-trained-on-the-decision-log.md) |
 | Closing the loop | Alerts and held payments become cases, one per account or device, prioritised with SLAs. A verdict labels every alert on the case and freezes the account or lifts its flags within the request; effects go through a transactional outbox, and Redis can be rebuilt from Postgres | [`case-service/`](case-service/src/paystream_cases/store.py), [ADR 9](docs/adr/0009-cases-close-the-loop.md) |
+| Regulatory reporting | Cash Transaction Reports and an STR worklist built in dbt per customer and Dhaka business day; structuring, pass-through and fan-in typologies; thresholds as config; dbt unit tests pin each rule; shareable extracts use salted pseudonyms | [`dbt/models/aml`](dbt/models/aml), [ADR 11](docs/adr/0011-aml-reporting-in-the-lakehouse.md) |
 | Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
 | Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI | [`rules/conformance`](rules/conformance) |
 | Money correctness | Integer paisa everywhere; double-entry ledger with a deferred balance check; daily stream vs ledger reconciliation | [`ledger/`](ledger/001_schema.sql), [`recon_stream_vs_ledger`](dbt/models/marts/recon_stream_vs_ledger.sql) |
 | Reprocessing | Bronze keeps every record as received; Airflow rebuilds a day of silver from bronze, then gold | [`paystream_backfill`](airflow/dags/paystream_backfill.py) |
 | Operating it | Grafana: throughput, consumer lag, alert latency, checkpoints, watermark lag | [`monitoring/`](monitoring) |
-| Acting on it | Fraud Ops Console: live alert feed, the case queue with claim and close, alerts and payments per minute, rule performance, reconciliation status, agents low on float, account lookup | [`dashboard/`](dashboard/app.py) |
+| Acting on it | Fraud Ops Console: live alert feed, the case queue with claim and close, AML worklist, alerts and payments per minute, rule performance, reconciliation status, agents low on float, account lookup | [`dashboard/`](dashboard/app.py) |
 
 ![Cases tab](docs/img/cases.png)
 <sub>The Cases tab: the analyst claims the most urgent case and closes it with a verdict. In the demo the real case store runs in process on the fixture's alerts.</sub>
@@ -127,7 +128,8 @@ Case API http://localhost:8097/docs.
   LightGBM, metrics match their definitions, a model trained on shuffled labels is refused, promotion
   and rollback, drift flags a shifted population, and the replayed log sees a burst only after the
   pipeline lag.
-* **dbt** (DuckDB in CI, Trino in the stack): uniqueness, accepted values, positive amounts,
+* **dbt** (DuckDB in CI, Trino in the stack): unit tests for the AML rules on hand-written rows,
+  simulator recall for structuring, uniqueness, accepted values, positive amounts,
   double-entry balance, and closed-day reconciliation.
 
 ## Benchmarks

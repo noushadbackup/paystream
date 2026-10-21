@@ -11,3 +11,23 @@
     {%- else -%} cast(to_milliseconds({{ end_ts }} - {{ start_ts }}) as double)
     {%- endif -%}
 {%- endmacro %}
+
+{# Bangladesh reports by local business day (Asia/Dhaka, UTC+6), not by UTC date. #}
+{% macro dhaka_date(ts) -%}
+    {%- if target.type == 'duckdb' -%} cast(timezone('Asia/Dhaka', {{ ts }}) as date)
+    {%- else -%} cast({{ ts }} AT TIME ZONE 'Asia/Dhaka' as date)
+    {%- endif -%}
+{%- endmacro %}
+
+{% macro list_agg(expr) -%}
+    {%- if target.type == 'duckdb' -%} string_agg(distinct {{ expr }}, ',' order by {{ expr }})
+    {%- else -%} array_join(array_sort(array_distinct(array_agg({{ expr }}))), ',')
+    {%- endif -%}
+{%- endmacro %}
+
+{# Stable pseudonym for sharing data outside the institution: same input, same token; not reversible without the salt. #}
+{% macro pseudonymize(expr) -%}
+    {%- if target.type == 'duckdb' -%} substr(sha256('{{ var("pii_salt") }}' || {{ expr }}), 1, 16)
+    {%- else -%} substr(lower(to_hex(sha256(to_utf8('{{ var("pii_salt") }}' || {{ expr }})))), 1, 16)
+    {%- endif -%}
+{%- endmacro %}

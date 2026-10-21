@@ -212,3 +212,18 @@ def shadow_alerts(b: Backend, now: pd.Timestamp, limit: int = 50) -> pd.DataFram
         """,
         (now,),
     )
+
+
+def aml_summary(b: Backend) -> dict:
+    hits = b.df("SELECT typology, count(*) AS hits, count(DISTINCT customer_id) AS customers, sum(amount_bdt) AS amount_bdt"
+                " FROM aml.aml_typology_hits GROUP BY typology ORDER BY typology")
+    ctr = b.df("SELECT count(*) AS reports, coalesce(sum(amount_bdt), 0) AS amount_bdt FROM aml.rpt_ctr")
+    return {"typologies": hits, "ctr_reports": int(ctr["reports"][0]), "ctr_bdt": float(ctr["amount_bdt"][0])}
+
+
+def str_candidates(b: Backend, limit: int = 100) -> pd.DataFrame:
+    return b.df(f"""
+        SELECT customer_id, typologies, typology_count, days_with_hits, amount_bdt, first_date, last_date, case_ids
+        FROM aml.rpt_str_candidates
+        ORDER BY typology_count DESC, amount_bdt DESC
+        LIMIT {int(limit)}""")

@@ -15,3 +15,18 @@ models:
     marts:
       +materialized: table
       +schema: gold
+    aml:
+      +materialized: table
+      +schema: aml
+
+vars:
+  # AML thresholds are the institution's reporting obligations, set here rather than in the SQL.
+  ctr_threshold_bdt: 1000000          # cash in, or cash out, per customer per business day
+  per_txn_limit_bdt: 25000            # the product's single-transaction limit
+  structuring_near_limit_share: 0.8   # a cash-in this close to the limit counts as "near the limit"
+  structuring_min_cash_ins: 3
+  pass_through_min_bdt: 50000
+  pass_through_share: 0.9
+  fan_in_min_senders: 10
+  # Overridden in deployment from a secret (dbt --vars); this one only makes CI reproducible.
+  pii_salt: "ci-only-salt"

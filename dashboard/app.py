@@ -117,7 +117,7 @@ def live() -> None:
         )
 
 
-live_tab, cases_tab, rules_tab = st.tabs(["Live", "Cases", "Rules"])
+live_tab, cases_tab, rules_tab, aml_tab = st.tabs(["Live", "Cases", "Rules", "AML"])
 with live_tab:
     live()
     st.divider()
@@ -213,6 +213,21 @@ with rules_tab:
         st.dataframe(shadow, hide_index=True)
     st.caption("Rules are written, backtested and approved in the rules service (maker-checker, audit log): "
                "`POST /rules`, `/backtest`, `/submit`, `/approve`. Approved versions reach Flink in seconds.")
+
+with aml_tab:
+    st.subheader("Anti-money-laundering")
+    st.caption("Per customer and business day in Asia/Dhaka. Thresholds are dbt vars set to the institution's "
+               "reporting obligations. A typology hit is a lead; the reporting officer decides what is filed.")
+    aml = q.aml_summary(b)
+    k = st.columns(3)
+    k[0].metric("CTR reports", f"{aml['ctr_reports']:,}")
+    k[1].metric("Cash reported", taka(aml["ctr_bdt"]))
+    k[2].metric("Customers with typology hits", f"{int(aml['typologies']['customers'].sum()):,}")
+    st.dataframe(aml["typologies"], hide_index=True,
+                 column_config={"amount_bdt": st.column_config.NumberColumn("Amount ৳", format="%,.0f")})
+    st.subheader("STR candidates")
+    st.dataframe(q.str_candidates(b), hide_index=True,
+                 column_config={"amount_bdt": st.column_config.NumberColumn("Amount ৳", format="%,.0f")})
 
 if lookup:
     st.divider()

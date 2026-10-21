@@ -1,0 +1,90 @@
+version: 2
+
+models:
+  - name: aml_customer_day
+    description: Per customer and business day (Asia/Dhaka), successful payments only.
+    columns:
+      - name: customer_id
+        meta: { pii: true }
+        tests: [not_null]
+  - name: rpt_ctr
+    description: Cash Transaction Report rows, at the threshold in var ctr_threshold_bdt.
+    columns:
+      - name: report_id
+        tests: [unique, not_null]
+      - name: customer_id
+        meta: { pii: true }
+  - name: aml_typology_hits
+    columns:
+      - name: customer_id
+        meta: { pii: true }
+      - name: typology
+        tests:
+          - accepted_values:
+              arguments:
+                values: [STRUCTURING, PASS_THROUGH, FAN_IN]
+  - name: rpt_str_candidates
+    description: STR worklist for the money-laundering reporting officer, one row per customer.
+    columns:
+      - name: customer_id
+        meta: { pii: true }
+        tests: [unique, not_null]
+  - name: share_aml_typologies_daily
+    description: Shareable outside the AML team; customer ids replaced by salted pseudonyms.
+    columns:
+      - name: customer_token
+        tests: [not_null]
+
+unit_tests:
+  - name: ctr_reports_each_direction_at_the_threshold
+    description: Customer-days at or over the threshold are reported once per direction; below it, not at all.
+    model: rpt_ctr
+    given:
+      - input: ref('aml_customer_day')
+        format: sql
+        rows: |
+          select 'U1' as customer_id, date '2026-10-01' as business_date, 600000.0 as cash_in_bdt, 1 as cash_ins,
+                 0 as near_limit_cash_ins, 0 as near_limit_agents, 0.0 as cash_out_bdt, 0.0 as p2p_in_bdt,
+                 0 as p2p_in_senders, 0.0 as p2p_out_bdt
+          union all
+          select 'U1', date '2026-10-02', 1200000.0, 2, 0, 0, 0.0, 0.0, 0, 0.0
+          union all
+          select 'U2', date '2026-10-02', 0.0, 0, 0, 0, 1000000.0, 0.0, 0, 0.0
+    expect:
+      rows:
+        - { report_id: CTR-2026-10-02-CASH_IN-U1, customer_id: U1, direction: CASH_IN, amount_bdt: 1200000.0 }
+        - { report_id: CTR-2026-10-02-CASH_OUT-U2, customer_id: U2, direction: CASH_OUT, amount_bdt: 1000000.0 }
+
+  - name: customer_day_uses_dhaka_business_days
+    model: aml_customer_day
+    given:
+      - input: ref('stg_payments')
+        format: sql
+        rows: |
+          select 'T1' as txn_id, timestamptz '2026-10-01 17:00:00+00' as event_time, 'CASH_IN' as txn_type,
+                 'A1' as sender_id, 'U1' as receiver_id, 2400000 as amount_paisa, 'SUCCESS' as status
+          union all select 'T2', timestamptz '2026-10-01 18:30:00+00', 'CASH_IN', 'A2', 'U1', 2300000, 'SUCCESS'
+          union all select 'T3', timestamptz '2026-10-01 19:00:00+00', 'CASH_IN', 'A3', 'U1', 2200000, 'SUCCESS'
+          union all select 'T4', timestamptz '2026-10-01 20:00:00+00', 'CASH_IN', 'A3', 'U1', 2100000, 'FAILED'
+    expect:
+      rows:
+        - { customer_id: U1, business_date: 2026-10-01, cash_in_bdt: 24000.0, cash_ins: 1, near_limit_cash_ins: 1 }
+        - { customer_id: U1, business_date: 2026-10-02, cash_in_bdt: 45000.0, cash_ins: 2, near_limit_cash_ins: 2 }
+
+  - name: typologies_fire_on_their_patterns_only
+    model: aml_typology_hits
+    given:
+      - input: ref('aml_customer_day')
+        format: sql
+        rows: |
+          select 'U_STRUCT' as customer_id, date '2026-10-01' as business_date, 68000.0 as cash_in_bdt, 3 as cash_ins,
+                 3 as near_limit_cash_ins, 2 as near_limit_agents, 0.0 as cash_out_bdt, 0.0 as p2p_in_bdt,
+                 0 as p2p_in_senders, 0.0 as p2p_out_bdt
+          union all select 'U_ONE_AGENT', date '2026-10-01', 68000.0, 3, 3, 1, 0.0, 0.0, 0, 0.0
+          union all select 'U_MULE', date '2026-10-01', 0.0, 0, 0, 0, 57000.0, 60000.0, 12, 0.0
+          union all select 'U_SAVER', date '2026-10-01', 0.0, 0, 0, 0, 20000.0, 60000.0, 3, 0.0
+    expect:
+      rows:
+        - { customer_id: U_STRUCT, typology: STRUCTURING }
+        - { customer_id: U_MULE, typology: PASS_THROUGH }
+        - { customer_id: U_MULE, typology: FAN_IN }
