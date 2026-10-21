@@ -8,12 +8,12 @@ help: ## List targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
 
 up: ## Start the core stack and submit both Flink jobs
-	$(COMPOSE) up -d --build --wait kafka schema-registry postgres connect minio iceberg-rest jobmanager taskmanager trino prometheus grafana kafka-exporter
+	$(COMPOSE) up -d --build --wait kafka schema-registry postgres connect minio iceberg-rest jobmanager taskmanager trino prometheus grafana kafka-exporter redis
 	$(COMPOSE) up kafka-init connect-init
-	$(COMPOSE) up -d --build --wait rules-service
+	$(COMPOSE) up -d --build --wait rules-service decision-service
 	$(MAKE) submit
 	@echo "Flink UI http://localhost:8082 · Grafana http://localhost:3000 · Trino localhost:8080 · MinIO http://localhost:9001"
-	@echo "Rules API http://localhost:8090/docs"
+	@echo "Rules API http://localhost:8090/docs · Decision API http://localhost:8095/docs"
 
 up-batch: ## Also start Airflow (http://localhost:8088)
 	$(COMPOSE) --profile batch up -d --build airflow
@@ -32,6 +32,11 @@ bench: ## Benchmark run (RATE, DURATION env vars; CHAOS=1 adds failure injection
 
 rules-demo: ## Write, backtest, approve and publish a rule through the rules service; Flink picks it up live
 	./scripts/rules-demo.sh
+
+decide-load: ## Load-test the decision API (RPS, DURATION); run `make load` alongside so features are live
+	pip install -q -e generator -e "decision-service[loadtest]"
+	paystream-decision-loadtest --url http://localhost:8095 --rps $${RPS:-1000} --seconds $${DURATION:-60} \
+	  --out benchmarks/runs/decision-$$(date +%s).json
 
 chaos: ## Kill the TaskManager and the broker mid-stream
 	./scripts/chaos.sh
@@ -52,6 +57,7 @@ schema-v1: ## Produce with the old schema (v1) to show evolution: the job keeps 
 test: ## All tests: generator, Flink (incl. Iceberg end-to-end), dbt on DuckDB
 	cd generator && $(PY) -m pytest -q
 	cd rules-service && $(PY) -m pytest -q
+	cd decision-service && $(PY) -m pytest -q
 	cd flink-jobs && mvn -q -B verify
 	cd dbt && $(PY) ci/build_fixture.py && dbt build --profiles-dir . --target duckdb
 	$(PY) -m pytest -q dashboard/tests
@@ -67,4 +73,4 @@ demo: ## Fraud Ops Console on generated demo data, no Docker needed
 down: ## Stop everything and delete data volumes
 	$(COMPOSE) --profile batch --profile load down -v
 
-.PHONY: help up up-batch submit load bench chaos verify sql dbt schema-v1 test console demo down rules-demo
+.PHONY: help up up-batch submit load bench chaos verify sql dbt schema-v1 test console demo down rules-demo decide-load

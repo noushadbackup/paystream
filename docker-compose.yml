@@ -217,6 +217,32 @@ services:
       - ./airflow/dags:/opt/airflow/dags:ro
       - ./dbt:/opt/paystream/dbt
 
+  redis:
+    image: redis:7.4
+    ports: ["6379:6379"]
+    # Online store: features and flags are rebuilt from Flink state, so no persistence is needed.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "2gb",
+              "--maxmemory-policy", "volatile-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 12
+
+  decision-service:
+    build: { context: decision-service }
+    ports: ["8095:8095"]
+    depends_on:
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    environment:
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP: kafka:9092
+      STORE_TIMEOUT_MS: "25"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8095/healthz')"]
+      interval: 5s
+      retries: 24
+
   rules-service:
     build: { context: ., dockerfile: rules-service/Dockerfile }
     ports: ["8090:8090"]

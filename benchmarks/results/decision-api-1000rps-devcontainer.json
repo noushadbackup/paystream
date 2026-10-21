@@ -1,0 +1,31 @@
+{
+  "target_rps": 1000,
+  "seconds": 60,
+  "client_processes": 2,
+  "achieved_rps": 999.4,
+  "requests_ok": 59998,
+  "errors": {},
+  "not_sent_client_saturated": 0,
+  "client_latency_ms": {
+    "p50": 1.813,
+    "p95": 5.269,
+    "p99": 47.973,
+    "max": 168.377
+  },
+  "server_latency_ms": {
+    "p50": 0.676,
+    "p95": 3.075,
+    "p99": 25.704,
+    "max": 156.025
+  },
+  "outcomes": {
+    "REVIEW": 30861,
+    "APPROVE": 29133,
+    "CHALLENGE": 4
+  },
+  "machine": {
+    "python": "3.13.16",
+    "platform": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39",
+    "cpus": 4
+  }
+}

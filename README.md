@@ -18,6 +18,9 @@ flowchart TB
     kafka[[Kafka + Schema Registry<br/>Avro contracts, BACKWARD compatible]]
     flink[Flink, exactly-once<br/>dedup · event-time windows<br/>4 built-in detectors + analyst rules]
     rules[Rules service<br/>versioned rules · maker-checker<br/>backtest · audit log]
+    redis[(Redis online store<br/>feature buckets · risk flags)]
+    decide[Decision API<br/>approve · challenge · review · decline]
+    gw[Payment gateway]
     alerts[[fraud.alerts]]
     dlq[[payments.dlq]]
     lake[(Iceberg on MinIO<br/>bronze · silver · gold)]
@@ -26,6 +29,10 @@ flowchart TB
     obs[Prometheus + Grafana]
 
     rules -->|fraud.rules| kafka
+    flink --> redis
+    gw -->|before authorising| decide
+    redis --> decide
+    decide -->|payments.decisions| kafka
     lake -.backtest.-> rules
     gen -->|payments.events| kafka
     gen --> pg --> dbz --> kafka
@@ -50,6 +57,8 @@ flowchart TB
 | Bad records | Undecodable records go to a dead-letter topic with offset and error; the job keeps running | [`PaymentEventDeserializer`](flink-jobs/src/main/java/io/paystream/flink/serde/PaymentEventDeserializer.java) |
 | Fraud in seconds | Four keyed detectors fire on arrival, not on watermark: velocity, mule fan-in, new-device cash-out, agent float spike vs the agent's own baseline | [`rules/`](flink-jobs/src/main/java/io/paystream/flink/rules) |
 | New fraud patterns without a deploy | Analysts write rules as JSON; Flink loads them through broadcast state and changes behaviour mid-stream, keeping state across restarts. New rules run in shadow first | [`DynamicRuleEvaluator`](flink-jobs/src/main/java/io/paystream/flink/rules/dynamic/DynamicRuleEvaluator.java), [`rules/library`](rules/library) |
+| Stopping fraud before money moves | The gateway asks the decision API before authorising. One pipelined Redis read of the feature buckets and risk flags Flink maintains; limits, flags from streaming rules, step-up on new devices, shared devices, mule fan-in; fails open only for small amounts when Redis is slow | [`decision-service/`](decision-service/src/paystream_decision/policy.py), [`OnlineFeatures`](flink-jobs/src/main/java/io/paystream/flink/online/OnlineFeatures.java), [ADR 8](docs/adr/0008-inline-decisions-from-streaming-state.md) |
+| Training data without skew | Every decision is logged with the exact features it used and lands in `silver.decisions` | [`log.py`](decision-service/src/paystream_decision/log.py) |
 | Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
 | Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI | [`rules/conformance`](rules/conformance) |
 | Money correctness | Integer paisa everywhere; double-entry ledger with a deferred balance check; daily stream vs ledger reconciliation | [`ledger/`](ledger/001_schema.sql), [`recon_stream_vs_ledger`](dbt/models/marts/recon_stream_vs_ledger.sql) |
@@ -72,6 +81,7 @@ make load        # 1,000 payments/s for 10 minutes into Kafka and the ledger
 make sql         # Trino: SELECT * FROM silver.fraud_alerts ORDER BY detected_at DESC LIMIT 20;
 make console     # Fraud Ops Console on the live stack: http://localhost:8501
 make rules-demo  # draft, backtest, approve and publish a rule; Flink runs it within seconds
+make decide-load # open-loop load test of the decision API (RPS=1000 DURATION=60)
 make up-batch    # Airflow at http://localhost:8088 (nightly dbt build, backfill DAG)
 make bench       # RATE=5000 DURATION=1800, writes benchmarks/runs/<time>.json
 make bench CHAOS=1
@@ -79,7 +89,7 @@ make down
 ```
 
 UIs: Flink http://localhost:8082 · Grafana http://localhost:3000 · MinIO http://localhost:9001 ·
-Rules API http://localhost:8090/docs.
+Rules API http://localhost:8090/docs · Decision API http://localhost:8095/docs.
 
 ## Tests
 
@@ -95,6 +105,9 @@ Rules API http://localhost:8090/docs.
 * **Rules service** (pytest): draft, submit, approve and reject; the author cannot approve; a failed
   publish leaves nothing live; the kill switch; tampering with the audit log is detected; the HTTP API
   with roles; and the conformance vectors, which the Flink tests also run.
+* **Decision service** (pytest): feature windows evaluated at decision time, limits, flags and their
+  expiry, step-up on new devices, degraded mode under a slow store, and the decision-log contract
+  that Flink parses (also tested on the Java side). The Redis sink is tested against a real Redis.
 * **dbt** (DuckDB in CI, Trino in the stack): uniqueness, accepted values, positive amounts,
   double-entry balance, and closed-day reconciliation.
 
@@ -111,6 +124,7 @@ schemas/       Avro contracts; history/ holds earlier versions
 flink-jobs/    Java: PaymentsJob (stream core, built-in detectors, analyst-rule engine) and LedgerCdcJob
 rules/         analyst rule contract (JSON Schema), starter library, conformance vectors
 rules-service/ Python: rule lifecycle API, maker-checker, audit log, backtester
+decision-service/ Python: inline decision API, policy, decision log, load tester
 ledger/        Postgres double-entry ledger schema
 connect/       Debezium connector config
 dbt/           staging + gold models on Trino; DuckDB target for CI

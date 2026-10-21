@@ -4,6 +4,9 @@ import io.paystream.flink.model.Alert;
 import io.paystream.flink.model.Envelope;
 import io.paystream.flink.model.KpiMinute;
 import io.paystream.flink.model.Payment;
+import io.paystream.flink.online.OnlineFeatures;
+import io.paystream.flink.online.RedisWrite;
+import io.paystream.flink.online.RiskFlags;
 import io.paystream.flink.rules.AgentFloatSpikeRule;
 import io.paystream.flink.rules.MuleFanInRule;
 import io.paystream.flink.rules.NewDeviceCashOutRule;
@@ -48,6 +51,29 @@ public final class PaymentsPipeline {
                           DataStream<KpiMinute> kpis, DataStream<Payment> late, DataStream<Envelope> dlq) {}
 
     private PaymentsPipeline() {}
+
+    /**
+     * What the decision service reads in the payment path: per-account, per-receiver and per-device
+     * activity buckets, known devices, and risk flags from non-shadow alerts.
+     */
+    public static DataStream<RedisWrite> onlineStore(Outputs out, Duration flushInterval, Duration flagTtl) {
+        DataStream<RedisWrite> sender = out.silver()
+                .keyBy(p -> p.senderId)
+                .process(new OnlineFeatures(OnlineFeatures.Entity.SENDER, flushInterval))
+                .name("features-sender").uid("features-sender");
+        DataStream<RedisWrite> receiver = out.silver()
+                .keyBy(p -> p.receiverId)
+                .process(new OnlineFeatures(OnlineFeatures.Entity.RECEIVER, flushInterval))
+                .name("features-receiver").uid("features-receiver");
+        DataStream<RedisWrite> device = out.silver()
+                .filter(p -> p.deviceId != null).name("has-device").uid("has-device")
+                .keyBy(p -> p.deviceId)
+                .process(new OnlineFeatures(OnlineFeatures.Entity.DEVICE, flushInterval))
+                .name("features-device").uid("features-device");
+        DataStream<RedisWrite> flags = out.alerts()
+                .flatMap(new RiskFlags(flagTtl.toSeconds())).name("risk-flags").uid("risk-flags");
+        return sender.union(receiver, device, flags);
+    }
 
     /**
      * Event time comes from the payment; undecodable records use their Kafka timestamp so they

@@ -2,12 +2,15 @@ package io.paystream.flink;
 
 import io.paystream.flink.model.Alert;
 import io.paystream.flink.model.Envelope;
+import io.paystream.flink.model.DecisionRecord;
 import io.paystream.flink.model.Label;
+import io.paystream.flink.online.RedisSink;
 import io.paystream.flink.pipeline.PaymentsPipeline;
 import io.paystream.flink.rules.RuleConfig;
 import io.paystream.flink.rules.dynamic.RuleUpdates;
 import io.paystream.flink.serde.AlertSerializer;
 import io.paystream.flink.serde.DeadLetterSerializer;
+import io.paystream.flink.serde.DecisionDeserializer;
 import io.paystream.flink.serde.HttpSchemaRegistry;
 import io.paystream.flink.serde.LabelDeserializer;
 import io.paystream.flink.serde.PaymentEventDeserializer;
@@ -22,6 +25,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.core.execution.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -96,6 +100,13 @@ public final class PaymentsJob {
                         .build())
                 .name("kafka-alerts").uid("kafka-alerts");
 
+        // Online store for the decision service: features and risk flags, at-least-once, idempotent writes.
+        PaymentsPipeline.onlineStore(out, Duration.ofMillis(p.getLong("featureFlushMs", 200)),
+                        Duration.ofSeconds(p.getLong("flagTtlS", 3600)))
+                .sinkTo(new RedisSink(p.get("redisHost", "redis"), p.getInt("redisPort", 6379),
+                        p.getInt("redisBatch", 500), p.getLong("redisMaxDelayMs", 50)))
+                .name("redis-online-store").uid("redis-online-store");
+
         out.dlq().sinkTo(KafkaSink.<Envelope>builder()
                         .setBootstrapServers(bootstrap)
                         .setRecordSerializer(new DeadLetterSerializer(p.get("dlqTopic", "payments.dlq")))
@@ -127,6 +138,18 @@ public final class PaymentsJob {
                 .build();
         IcebergTables.insertLabels(tEnv, set, env
                 .fromSource(labelsSource, WatermarkStrategy.noWatermarks(), "kafka-labels").uid("kafka-labels"));
+
+        // Every decision the decision service made, with the features it saw: the audit trail for a
+        // declined customer, and model training data that matches what the model is served.
+        KafkaSource<DecisionRecord> decisionsSource = KafkaSource.<DecisionRecord>builder()
+                .setBootstrapServers(bootstrap)
+                .setTopics(p.get("decisionsTopic", "payments.decisions"))
+                .setGroupId(p.get("groupId", "paystream-flink") + "-decisions")
+                .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
+                .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(new DecisionDeserializer()))
+                .build();
+        IcebergTables.insertDecisions(tEnv, set, env
+                .fromSource(decisionsSource, WatermarkStrategy.noWatermarks(), "kafka-decisions").uid("kafka-decisions"));
         set.attachAsDataStream();
 
         env.execute("paystream-payments");

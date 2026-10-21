@@ -1,7 +1,7 @@
 # Benchmarks
 
-**Status: not measured yet.** The harness is ready; this page gets the numbers from the first real
-runs. Every number below will come from a `benchmarks/runs/*.json` file committed next to it, with
+**Status:** the decision API has a first measured run (below). The streaming pipeline numbers come
+from the first full-stack runs. Every number below will come from a `benchmarks/runs/*.json` file committed next to it, with
 the machine it ran on. Targets that are missed get reported as missed.
 
 ## How a run works
@@ -27,9 +27,22 @@ detection quality and latency.
 | Exactly-once under failure | Kafka records == bronze rows; silver rows == distinct txn_ids | `measure.py --verify-only` after a CHAOS run |
 | Fraud recall | ≥ 95% per scenario, precision reported | generator ground-truth labels |
 | Exactly-once cost | throughput and latency vs at-least-once | same run with `checkpointMs` and sink mode changed |
+| Decision API latency | p99 < 50 ms at 1,000 decisions/s | `make decide-load`, client-side and server-side |
 
 ## Results
 
 | Run | Machine | Rate | Throughput | Alert p95 | Freshness p95 | Recall (min scenario) | Precision | Exactly-once |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | _none yet_ | | | | | | | | |
+
+### Decision API
+
+| Run | Machine | Target rate | Achieved | Client p50 / p95 / p99 | Server p50 / p95 / p99 | Errors |
+| --- | --- | --- | --- | --- | --- | --- |
+| [2026-10-21](benchmarks/results/decision-api-1000rps-devcontainer.json) | 4-vCPU shared cloud dev container; 2 uvicorn workers, local Redis 7 and the load client on the same box | 1,000/s for 60 s | 999/s | 1.8 / 5.3 / 48.0 ms | 0.7 / 3.1 / 25.7 ms | 0 |
+
+Redis was filled with synthetic feature values of realistic size for the generator's 200,000
+accounts, since this container has no Kafka or Flink; outcomes from that run are not meaningful,
+latency is. p99 varied between 15 and 48 ms across 1,000/s runs on this shared machine, and the
+two workers saturate at about 2,000/s here. The target is met at 1,000/s; the margin at p99 is thin
+on this box, and the run on a dedicated machine with the full stack is the one to quote.

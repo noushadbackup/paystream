@@ -1,5 +1,6 @@
 package io.paystream.flink.sink;
 
+import io.paystream.flink.model.DecisionRecord;
 import io.paystream.flink.model.Label;
 import io.paystream.flink.pipeline.PaymentsPipeline;
 import java.util.LinkedHashMap;
@@ -52,6 +53,12 @@ public final class IcebergTables {
                 + " score DOUBLE, details STRING, rule_id STRING, rule_version INT, shadow BOOLEAN, action STRING,"
                 + " event_date DATE) PARTITIONED BY (event_date)" + v2);
         addMissingColumns(tEnv, "silver", "fraud_alerts", ALERT_COLUMNS_V2);
+        tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.silver.decisions ("
+                + "decision_id STRING, txn_id STRING, decided_at TIMESTAMP_LTZ(3), event_time TIMESTAMP_LTZ(3),"
+                + " outcome STRING, reasons STRING, risk_score DOUBLE, policy_version STRING, degraded BOOLEAN,"
+                + " latency_us BIGINT, txn_type STRING, sender_id STRING, receiver_id STRING, device_id STRING,"
+                + " amount_paisa BIGINT, features STRING, flags STRING, decision_date DATE"
+                + ") PARTITIONED BY (decision_date)" + v2);
         tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.silver.fraud_labels ("
                 + "txn_id STRING, scenario STRING, account_id STRING, labelled_at TIMESTAMP_LTZ(3), label_date DATE"
                 + ") PARTITIONED BY (label_date)" + v2);
@@ -96,6 +103,15 @@ public final class IcebergTables {
         tEnv.createTemporaryView("v_labels", labels);
         set.addInsertSql("INSERT INTO lake.silver.fraud_labels SELECT txnId, scenario, accountId,"
                 + " TO_TIMESTAMP_LTZ(labelledAt, 3), CAST(TO_TIMESTAMP_LTZ(labelledAt, 3) AS DATE) FROM v_labels");
+    }
+
+    public static void insertDecisions(StreamTableEnvironment tEnv, StreamStatementSet set,
+                                       DataStream<DecisionRecord> decisions) {
+        tEnv.createTemporaryView("v_decisions", decisions);
+        set.addInsertSql("INSERT INTO lake.silver.decisions SELECT decisionId, txnId, TO_TIMESTAMP_LTZ(decidedAt, 3),"
+                + " TO_TIMESTAMP_LTZ(eventTime, 3), outcome, reasons, riskScore, policyVersion, degraded, latencyUs,"
+                + " txnType, senderId, receiverId, deviceId, amountPaisa, features, flags,"
+                + " CAST(TO_TIMESTAMP_LTZ(decidedAt, 3) AS DATE) FROM v_decisions");
     }
 
     /** Columns added to silver.fraud_alerts in v2 (analyst rules), for tables created before them. */

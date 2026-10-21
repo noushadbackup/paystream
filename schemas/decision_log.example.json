@@ -1,0 +1,8 @@
+{"decision_id": "6f1c2a9e-7d1b-4a55-9a37-1b2a3c4d5e6f", "txn_id": "T0042000000000017", "outcome": "REVIEW",
+ "reasons": ["RECEIVER_FLAGGED", "VELOCITY"], "risk_score": 0.8, "policy_version": "2026-10-21.1",
+ "degraded": false, "latency_us": 640, "decided_at": 1790000030120, "event_time": 1790000030000,
+ "request": {"txn_id": "T0042000000000017", "txn_type": "P2P", "sender_id": "U0001234", "receiver_id": "U0009876",
+             "amount_paisa": 150000, "device_id": "D00001234", "district": "Dhaka", "channel": "APP",
+             "event_time": 1790000030000},
+ "features": {"s_txn_2m": 5, "s_txn_10m": 5, "device_known": true, "amount_bdt": 1500.0},
+ "flags": ["MULE_FAN_IN"]}

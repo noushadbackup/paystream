@@ -6,7 +6,7 @@ time the previous day's late events (up to 30 min) and CDC changes have landed.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from airflow.decorators import dag, task
 from airflow.operators.bash import BashOperator
@@ -15,7 +15,7 @@ from paystream_common import DBT_CMD, DBT_ENV, STREAMING_TABLES, trino
 
 @dag(
     schedule="0 2 * * *",
-    start_date=datetime(2026, 10, 1),
+    start_date=datetime(2026, 10, 1, tzinfo=UTC),
     catchup=False,
     max_active_runs=1,
     default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},

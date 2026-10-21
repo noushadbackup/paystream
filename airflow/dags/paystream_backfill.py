@@ -7,7 +7,7 @@ delete-then-insert of one day's partition in a single DAG task, so rerunning it 
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from airflow.decorators import dag, task
 from airflow.models.param import Param
@@ -17,11 +17,11 @@ from paystream_common import DBT_CMD, DBT_ENV, sql, trino
 
 @dag(
     schedule=None,
-    start_date=datetime(2026, 10, 1),
+    start_date=datetime(2026, 10, 1, tzinfo=UTC),
     catchup=False,
     params={
-        "start": Param(str(date.today() - timedelta(days=2)), type="string", format="date"),
-        "end": Param(str(date.today() - timedelta(days=2)), type="string", format="date"),
+        "start": Param(str(datetime.now(UTC).date() - timedelta(days=2)), type="string", format="date"),
+        "end": Param(str(datetime.now(UTC).date() - timedelta(days=2)), type="string", format="date"),
     },
     tags=["paystream", "backfill"],
 )
@@ -29,7 +29,7 @@ def paystream_backfill():
     @task
     def days(**ctx) -> list[str]:
         start, end = date.fromisoformat(ctx["params"]["start"]), date.fromisoformat(ctx["params"]["end"])
-        if end >= date.today():
+        if end >= datetime.now(UTC).date():
             raise ValueError("only closed days can be rebuilt: the stream is still writing today")
         return [str(start + timedelta(days=i)) for i in range((end - start).days + 1)]
 
