@@ -201,7 +201,7 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   airflow:
-    build: { context: airflow }
+    build: { context: ., dockerfile: airflow/Dockerfile }
     profiles: [batch]
     command: standalone
     ports: ["8088:8080"]
@@ -213,9 +213,11 @@ services:
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
       PAYSTREAM_DBT_DIR: /opt/paystream/dbt
       TRINO_HOST: trino
+      MODEL_REGISTRY: /models
     volumes:
       - ./airflow/dags:/opt/airflow/dags:ro
       - ./dbt:/opt/paystream/dbt
+      - models:/models
 
   redis:
     image: redis:7.4
@@ -238,6 +240,10 @@ services:
       REDIS_HOST: redis
       KAFKA_BOOTSTRAP: kafka:9092
       STORE_TIMEOUT_MS: "25"
+      # champion and challenger pointers; re-read every 30 s, so a promotion needs no restart
+      MODEL_REGISTRY: /models
+    volumes:
+      - models:/models:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8095/healthz')"]
       interval: 5s
@@ -306,3 +312,4 @@ services:
 volumes:
   minio-data:
   catalog-data:
+  models:

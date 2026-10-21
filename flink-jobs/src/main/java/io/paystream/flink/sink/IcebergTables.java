@@ -57,8 +57,10 @@ public final class IcebergTables {
                 + "decision_id STRING, txn_id STRING, decided_at TIMESTAMP_LTZ(3), event_time TIMESTAMP_LTZ(3),"
                 + " outcome STRING, reasons STRING, risk_score DOUBLE, policy_version STRING, degraded BOOLEAN,"
                 + " latency_us BIGINT, txn_type STRING, sender_id STRING, receiver_id STRING, device_id STRING,"
-                + " amount_paisa BIGINT, features STRING, flags STRING, decision_date DATE"
+                + " amount_paisa BIGINT, features STRING, flags STRING, model_version STRING, model_score DOUBLE,"
+                + " challenger_version STRING, challenger_score DOUBLE, decision_date DATE"
                 + ") PARTITIONED BY (decision_date)" + v2);
+        addMissingColumns(tEnv, "silver", "decisions", DECISION_COLUMNS_V2);
         tEnv.executeSql("CREATE TABLE IF NOT EXISTS lake.silver.fraud_labels ("
                 + "txn_id STRING, scenario STRING, account_id STRING, source STRING, disposition STRING,"
                 + " case_id STRING, labelled_by STRING, labelled_at TIMESTAMP_LTZ(3), label_date DATE"
@@ -112,10 +114,15 @@ public final class IcebergTables {
     public static void insertDecisions(StreamTableEnvironment tEnv, StreamStatementSet set,
                                        DataStream<DecisionRecord> decisions) {
         tEnv.createTemporaryView("v_decisions", decisions);
-        set.addInsertSql("INSERT INTO lake.silver.decisions SELECT decisionId, txnId, TO_TIMESTAMP_LTZ(decidedAt, 3),"
+        // explicit columns: on a table migrated from v1 the model columns sit after the partition column
+        set.addInsertSql("INSERT INTO lake.silver.decisions (decision_id, txn_id, decided_at, event_time, outcome,"
+                + " reasons, risk_score, policy_version, degraded, latency_us, txn_type, sender_id, receiver_id,"
+                + " device_id, amount_paisa, features, flags, model_version, model_score, challenger_version,"
+                + " challenger_score, decision_date)"
+                + " SELECT decisionId, txnId, TO_TIMESTAMP_LTZ(decidedAt, 3),"
                 + " TO_TIMESTAMP_LTZ(eventTime, 3), outcome, reasons, riskScore, policyVersion, degraded, latencyUs,"
-                + " txnType, senderId, receiverId, deviceId, amountPaisa, features, flags,"
-                + " CAST(TO_TIMESTAMP_LTZ(decidedAt, 3) AS DATE) FROM v_decisions");
+                + " txnType, senderId, receiverId, deviceId, amountPaisa, features, flags, modelVersion, modelScore,"
+                + " challengerVersion, challengerScore, CAST(TO_TIMESTAMP_LTZ(decidedAt, 3) AS DATE) FROM v_decisions");
     }
 
     /** Columns added to silver.fraud_alerts in v2 (analyst rules), for tables created before them. */
@@ -123,6 +130,16 @@ public final class IcebergTables {
 
     /** Columns added to silver.fraud_labels in v2 (analyst case decisions). */
     private static final Map<String, Type> LABEL_COLUMNS_V2 = new LinkedHashMap<>();
+
+    /** Columns added to silver.decisions in v2 (model scores). */
+    private static final Map<String, Type> DECISION_COLUMNS_V2 = new LinkedHashMap<>();
+
+    static {
+        DECISION_COLUMNS_V2.put("model_version", Types.StringType.get());
+        DECISION_COLUMNS_V2.put("model_score", Types.DoubleType.get());
+        DECISION_COLUMNS_V2.put("challenger_version", Types.StringType.get());
+        DECISION_COLUMNS_V2.put("challenger_score", Types.DoubleType.get());
+    }
 
     static {
         LABEL_COLUMNS_V2.put("source", Types.StringType.get());

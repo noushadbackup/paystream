@@ -26,6 +26,11 @@ public class DecisionRecord {
     /** The exact features the decision saw, as JSON: training data without training-serving skew. */
     public String features;
     public String flags;
+    /** Champion model that scored the payment (null without one), and the challenger scored alongside. */
+    public String modelVersion;
+    public Double modelScore;
+    public String challengerVersion;
+    public Double challengerScore;
 
     public DecisionRecord() {}
 
@@ -50,6 +55,10 @@ public class DecisionRecord {
         d.amountPaisa = req.path("amount_paisa").asLong();
         d.features = n.path("features").isNull() ? null : n.path("features").toString();
         d.flags = join(n.path("flags"));
+        d.modelVersion = n.path("model").path("version").asText(null);
+        d.modelScore = n.path("model").has("score") ? n.path("model").path("score").asDouble() : null;
+        d.challengerVersion = n.path("challenger").path("version").asText(null);
+        d.challengerScore = n.path("challenger").has("score") ? n.path("challenger").path("score").asDouble() : null;
         return d;
     }
 

@@ -21,6 +21,15 @@ models:
     columns:
       - name: txn_id
         tests: [unique, not_null]
+  - name: stg_decisions
+    columns:
+      - name: decision_id
+        tests: [unique, not_null]
+      - name: outcome
+        tests:
+          - accepted_values:
+              arguments:
+                values: [APPROVE, CHALLENGE, REVIEW, DECLINE]
   - name: stg_fraud_alerts
     columns:
       - name: alert_id

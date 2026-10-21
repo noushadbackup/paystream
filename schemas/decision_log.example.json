@@ -5,4 +5,6 @@
              "amount_paisa": 150000, "device_id": "D00001234", "district": "Dhaka", "channel": "APP",
              "event_time": 1790000030000},
  "features": {"s_txn_2m": 5, "s_txn_10m": 5, "device_known": true, "amount_bdt": 1500.0},
- "flags": ["MULE_FAN_IN"]}
+ "flags": ["MULE_FAN_IN"],
+ "model": {"version": "202610210300-1a2b3c4d", "score": 0.731204},
+ "challenger": {"version": "202610220300-5e6f7a8b", "score": 0.802117}}

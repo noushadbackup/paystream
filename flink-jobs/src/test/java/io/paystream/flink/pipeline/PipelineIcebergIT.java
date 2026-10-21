@@ -2,12 +2,14 @@ package io.paystream.flink.pipeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.paystream.flink.model.DecisionRecord;
 import io.paystream.flink.model.Envelope;
 import io.paystream.flink.model.Label;
 import io.paystream.flink.model.Payment;
 import io.paystream.flink.rules.RuleConfig;
 import io.paystream.flink.rules.dynamic.RuleUpdates;
 import io.paystream.flink.sink.IcebergTables;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneOffset;
@@ -102,6 +104,8 @@ class PipelineIcebergIT {
         label.disposition = "FRAUD";
         label.caseId = "C1";
         IcebergTables.insertLabels(tEnv, set, env.fromData(label));
+        IcebergTables.insertDecisions(tEnv, set, env.fromData(DecisionRecord.parse(
+                Files.readAllBytes(Path.of("..", "schemas", "decision_log.example.json")))));
         set.attachAsDataStream();
         env.execute("pipeline-it");
 
@@ -124,6 +128,11 @@ class PipelineIcebergIT {
         }
         assertThat(count(batch, "SELECT count(*) FROM lake.silver.fraud_labels l JOIN lake.silver.fraud_alerts a"
                 + " ON a.account_id = l.account_id WHERE a.rule_id = 'device-farm'")).isEqualTo(1);
+        try (CloseableIterator<Row> it = batch.executeSql("SELECT outcome, reasons, model_version, model_score,"
+                + " challenger_score FROM lake.silver.decisions").collect()) {
+            assertThat(it.next().toString())
+                    .isEqualTo("+I[REVIEW, RECEIVER_FLAGGED,VELOCITY, 202610210300-1a2b3c4d, 0.731204, 0.802117]");
+        }
         // the KPI windows hold every on-time transaction exactly once
         assertThat(count(batch, "SELECT sum(txn_count) FROM lake.gold.kpi_minute")).isEqualTo(normal + fraud);
         assertThat(DLQ).singleElement().satisfies(e -> assertThat(e.offset).isEqualTo(7));

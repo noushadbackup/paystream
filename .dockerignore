@@ -1,0 +1,13 @@
+# Build contexts are the repo root for most images: keep build outputs and local data out of them.
+.git
+**/target
+**/__pycache__
+**/*.egg-info
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+dbt/target
+dbt/logs
+dbt/ci/*.duckdb*
+benchmarks/runs
+docs/img

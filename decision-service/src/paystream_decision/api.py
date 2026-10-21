@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from redis.exceptions import RedisError
 
 from paystream_decision import features as feat
+from paystream_decision.model import Registry, score_decision
 from paystream_decision.policy import Policy, decide, live_flags
 from paystream_decision.store import OnlineStore
 
@@ -37,6 +38,8 @@ STORE_LATENCY = Histogram("decision_store_latency_seconds", "Online store round 
                           buckets=(0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.025, 0.05))
 OUTCOMES = Counter("decisions_total", "Decisions by outcome", ["outcome"])
 DEGRADED = Counter("decisions_degraded_total", "Decisions made without online features")
+MODEL_LATENCY = Histogram("decision_model_latency_seconds", "Champion and challenger scoring",
+                          buckets=(0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008))
 
 
 class PaymentRequest(BaseModel):
@@ -62,7 +65,10 @@ class DecisionResponse(BaseModel):
     latency_us: int
 
 
-def create_app(redis, log, policy: Policy | None = None, store_timeout_s: float = 0.025) -> FastAPI:
+def create_app(redis, log, policy: Policy | None = None, store_timeout_s: float = 0.025,
+               models: Registry | None = None) -> FastAPI:
+    """``models``: the champion scores every payment with features and holds it for review above its
+    threshold; the challenger is scored on the same payment and only logged."""
     policy = policy or Policy()
     store = OnlineStore(redis)
 
@@ -75,7 +81,8 @@ def create_app(redis, log, policy: Policy | None = None, store_timeout_s: float 
 
     @app.get("/healthz")
     async def healthz():
-        return {"ok": True, "policy": policy.version}
+        champion = models.champion if models else None
+        return {"ok": True, "policy": policy.version, "model": champion.version if champion else None}
 
     @app.get("/metrics")
     async def metrics():
@@ -106,6 +113,10 @@ def create_app(redis, log, policy: Policy | None = None, store_timeout_s: float 
         STORE_LATENCY.observe(time.perf_counter() - t0)
 
         d = decide(policy, req, f, flags, now)
+        t1 = time.perf_counter()
+        scores = score_decision(models, f, d)
+        if scores:
+            MODEL_LATENCY.observe(time.perf_counter() - t1)
         latency_us = int((time.perf_counter() - started) * 1_000_000)
         LATENCY.observe(latency_us / 1_000_000)
         OUTCOMES.labels(d.outcome).inc()
@@ -122,7 +133,7 @@ def create_app(redis, log, policy: Policy | None = None, store_timeout_s: float 
         }
         log({**result, "decided_at": int(time.time() * 1000), "event_time": now,
              "request": {k: v for k, v in req.items() if not k.startswith("_")},
-             "features": f, "flags": sorted({r for fl in flags.values() for r in live_flags(fl, now)})})
+             "features": f, "flags": sorted({r for fl in flags.values() for r in live_flags(fl, now)}), **scores})
         return result
 
     return app
@@ -137,5 +148,7 @@ def app_from_env() -> FastAPI:
     r = aioredis.Redis(host=os.environ.get("REDIS_HOST", "localhost"), port=int(os.environ.get("REDIS_PORT", "6379")),
                        socket_timeout=0.05, max_connections=int(os.environ.get("REDIS_POOL", "64")))
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP")
+    model_dir = os.environ.get("MODEL_REGISTRY")
     return create_app(r, KafkaDecisionLog(bootstrap) if bootstrap else MemoryDecisionLog(),
-                      store_timeout_s=float(os.environ.get("STORE_TIMEOUT_MS", "25")) / 1000)
+                      store_timeout_s=float(os.environ.get("STORE_TIMEOUT_MS", "25")) / 1000,
+                      models=Registry(model_dir) if model_dir else None)

@@ -8,6 +8,10 @@ models:
   - name: fct_fraud_alerts_daily
   - name: fct_rule_performance_daily
     description: Per rule and day; shadow rules apart. precision_vs_labels = share of alerts on labelled accounts.
+  - name: fct_decisions_daily
+    description: Inline decisions per day and outcome; labelled_fraud_bdt on APPROVE is fraud that got through.
+  - name: fct_model_comparison_daily
+    description: Champion and challenger scored on the same decisions, per day.
   - name: recon_stream_vs_ledger
     description: One row per day. status = BROKEN means money moved in one system and not the other.
     columns:

@@ -17,6 +17,9 @@ sources:
       - name: fraud_labels
         description: Ground truth (simulator labels, later analyst case decisions). Measurement only.
         loaded_at_field: labelled_at
+      - name: decisions
+        description: Every inline decision with the exact features it used and the model scores, from payments.decisions.
+        loaded_at_field: decided_at
       - name: ledger_transfers
         description: Postgres ledger transfers, mirrored through Debezium CDC.
         loaded_at_field: posted_at

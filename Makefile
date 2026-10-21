@@ -38,6 +38,10 @@ decide-load: ## Load-test the decision API (RPS, DURATION); run `make load` alon
 	paystream-decision-loadtest --url http://localhost:8095 --rps $${RPS:-1000} --seconds $${DURATION:-60} \
 	  --out benchmarks/runs/decision-$$(date +%s).json
 
+model: ## Train a challenger on the lakehouse and promote it if it beats the champion (needs `make up-batch`)
+	$(COMPOSE) --profile batch exec airflow sh -c '$$ML_BIN train --trino trino --registry /models --days 35 \
+	  && $$ML_BIN promote --trino trino --registry /models'
+
 chaos: ## Kill the TaskManager and the broker mid-stream
 	./scripts/chaos.sh
 
@@ -59,16 +63,19 @@ test: ## All tests: generator, Flink (incl. Iceberg end-to-end), dbt on DuckDB
 	cd rules-service && $(PY) -m pytest -q
 	cd decision-service && $(PY) -m pytest -q
 	cd case-service && $(PY) -m pytest -q
+	cd ml && $(PY) -m pytest -q
 	cd flink-jobs && mvn -q -B verify
-	cd dbt && $(PY) ci/build_fixture.py && dbt build --profiles-dir . --target duckdb
+	cd dbt && $(PY) ci/build_fixture.py && paystream-ml replay --duckdb ci/ci.duckdb \
+	  && dbt build --profiles-dir . --target duckdb
 	$(PY) -m pytest -q dashboard/tests
 
 console: ## Fraud Ops Console on the live stack (http://localhost:8501)
 	$(COMPOSE) up -d --build ops-console
 
 demo: ## Fraud Ops Console on generated demo data, no Docker needed
-	pip install -q -e generator -e "rules-service[dev]" -e case-service "dbt-core>=1.10,<2" dbt-duckdb -r dashboard/requirements.txt
-	cd dbt && $(PY) ci/build_fixture.py && dbt build --profiles-dir . --target duckdb -q
+	pip install -q -e generator -e "rules-service[dev]" -e case-service -e decision-service -e ml \
+	  "dbt-core>=1.10,<2" dbt-duckdb -r dashboard/requirements.txt
+	cd dbt && $(PY) ci/build_fixture.py && paystream-ml replay --duckdb ci/ci.duckdb && dbt build --profiles-dir . --target duckdb -q
 	cd dashboard && PAYSTREAM_DUCKDB=../dbt/ci/ci.duckdb streamlit run app.py
 
 down: ## Stop everything and delete data volumes

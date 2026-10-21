@@ -19,5 +19,16 @@ class DecisionRecordTest {
         assertThat(d.latencyUs).isEqualTo(640);
         assertThat(d.features).contains("\"s_txn_2m\":5");
         assertThat(d.flags).isEqualTo("MULE_FAN_IN");
+        assertThat(d.modelVersion).isEqualTo("202610210300-1a2b3c4d");
+        assertThat(d.modelScore).isEqualTo(0.731204);
+        assertThat(d.challengerScore).isEqualTo(0.802117);
+    }
+
+    @Test
+    void decisionsWithoutAModelHaveNullScores() throws Exception {
+        DecisionRecord d = DecisionRecord.parse("{\"txn_id\": \"T1\", \"request\": {}}".getBytes());
+        assertThat(d.modelVersion).isNull();
+        assertThat(d.modelScore).isNull();
+        assertThat(d.challengerVersion).isNull();
     }
 }

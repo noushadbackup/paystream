@@ -1,0 +1,29 @@
+[project]
+name = "paystream-ml"
+version = "0.1.0"
+description = "PayStream fraud model: trained on the decision log and case labels, served by the decision service"
+requires-python = ">=3.11"
+# also needs paystream-decision (../decision-service): it owns the feature set and the serving format
+dependencies = [
+  "lightgbm>=4.3",
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "duckdb>=1.1",
+]
+
+[project.optional-dependencies]
+trino = ["trino>=0.330"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+paystream-ml = "paystream_ml.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

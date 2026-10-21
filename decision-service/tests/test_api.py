@@ -75,13 +75,43 @@ def test_rejects_malformed_requests(redis, log):
         assert "decision_latency_seconds" in c.get("/metrics").text
 
 
-def test_log_record_matches_the_lakehouse_contract(redis, log):
+def registry(root, challenger_threshold=0.6):
+    import json
+
+    from paystream_decision.model import Registry
+
+    tree = {"f": [0], "t": [5.5], "l": [-1], "r": [-2], "d": [True], "m": [2], "v": [-3.0, 3.0]}
+    for version, threshold in (("champ", 0.6), ("chall", challenger_threshold)):
+        d = root / "models" / version
+        d.mkdir(parents=True)
+        (d / "model.json").write_text(json.dumps({"format": "paystream-gbdt/1", "version": version,
+                                                  "features": ["s_txn_10m"], "threshold": threshold,
+                                                  "trees": [tree]}))
+    (root / "champion").write_text("champ")
+    (root / "challenger").write_text("chall")
+    return Registry(root)
+
+
+def test_log_record_matches_the_lakehouse_contract(redis, log, tmp_path):
     """schemas/decision_log.example.json is what Flink parses into silver.decisions."""
     from pathlib import Path
 
     example = orjson.loads((Path(__file__).resolve().parents[2] / "schemas/decision_log.example.json").read_bytes())
-    with TestClient(create_app(redis, log)) as c:
+    with TestClient(create_app(redis, log, models=registry(tmp_path))) as c:
         c.post("/v1/decisions", json=body())
     record = log[0]
     assert set(record) == set(example)
     assert set(example["request"]) <= set(record["request"])
+    assert set(record["model"]) == set(example["model"]) == set(record["challenger"])
+
+
+def test_the_champion_holds_risky_payments_and_the_challenger_is_only_logged(redis, log, tmp_path):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(redis.set("f:s:U1", activity(minutes=[(minute(0), 9, 0, 0, 0)])))
+    with TestClient(create_app(redis, log, models=registry(tmp_path, challenger_threshold=0.0))) as c:
+        risky = c.post("/v1/decisions", json=body()).json()
+        quiet = c.post("/v1/decisions", json=body(txn_id="T2", sender_id="U5")).json()
+        assert c.get("/healthz").json()["model"] == "champ"
+    assert risky["outcome"] == "REVIEW" and "MODEL_SCORE" in risky["reasons"]
+    assert quiet["outcome"] == "APPROVE", "the challenger's threshold never acts"
+    assert log[0]["model"]["version"] == "champ" and log[0]["challenger"]["version"] == "chall"

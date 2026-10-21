@@ -62,7 +62,8 @@ flowchart TB
 | Fraud in seconds | Four keyed detectors fire on arrival, not on watermark: velocity, mule fan-in, new-device cash-out, agent float spike vs the agent's own baseline | [`rules/`](flink-jobs/src/main/java/io/paystream/flink/rules) |
 | New fraud patterns without a deploy | Analysts write rules as JSON; Flink loads them through broadcast state and changes behaviour mid-stream, keeping state across restarts. New rules run in shadow first | [`DynamicRuleEvaluator`](flink-jobs/src/main/java/io/paystream/flink/rules/dynamic/DynamicRuleEvaluator.java), [`rules/library`](rules/library) |
 | Stopping fraud before money moves | The gateway asks the decision API before authorising. One pipelined Redis read of the feature buckets and risk flags Flink maintains; limits, flags from streaming rules, step-up on new devices, shared devices, mule fan-in; fails open only for small amounts when Redis is slow | [`decision-service/`](decision-service/src/paystream_decision/policy.py), [`OnlineFeatures`](flink-jobs/src/main/java/io/paystream/flink/online/OnlineFeatures.java), [ADR 8](docs/adr/0008-inline-decisions-from-streaming-state.md) |
-| Training data without skew | Every decision is logged with the exact features it used and lands in `silver.decisions` | [`log.py`](decision-service/src/paystream_decision/log.py) |
+| Training data without skew | Every decision is logged with the exact features it used and lands in `silver.decisions`; the model trains on that log joined to case labels, never on recomputed features | [`log.py`](decision-service/src/paystream_decision/log.py), [`dataset.py`](ml/src/paystream_ml/dataset.py) |
+| A model in the payment path | LightGBM exported to a JSON tree format the decision service scores in pure Python (~120 µs), checked equal to LightGBM to 1e-9. Champion acts, challenger is scored on the same traffic and logged; promotion needs a paired-bootstrap win on fresh labelled decisions; daily drift check | [`ml/`](ml/src/paystream_ml/registry.py), [`model.py`](decision-service/src/paystream_decision/model.py), [ADR 10](docs/adr/0010-model-trained-on-the-decision-log.md) |
 | Closing the loop | Alerts and held payments become cases, one per account or device, prioritised with SLAs. A verdict labels every alert on the case and freezes the account or lifts its flags within the request; effects go through a transactional outbox, and Redis can be rebuilt from Postgres | [`case-service/`](case-service/src/paystream_cases/store.py), [ADR 9](docs/adr/0009-cases-close-the-loop.md) |
 | Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
 | Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI | [`rules/conformance`](rules/conformance) |
@@ -90,7 +91,8 @@ make sql         # Trino: SELECT * FROM silver.fraud_alerts ORDER BY detected_at
 make console     # Fraud Ops Console on the live stack: http://localhost:8501
 make rules-demo  # draft, backtest, approve and publish a rule; Flink runs it within seconds
 make decide-load # open-loop load test of the decision API (RPS=1000 DURATION=60)
-make up-batch    # Airflow at http://localhost:8088 (nightly dbt build, backfill DAG)
+make up-batch    # Airflow at http://localhost:8088 (nightly dbt build, backfill, model training and drift)
+make model       # train a challenger on the lakehouse, promote it if it beats the champion
 make bench       # RATE=5000 DURATION=1800, writes benchmarks/runs/<time>.json
 make bench CHAOS=1
 make down
@@ -121,6 +123,10 @@ Case API http://localhost:8097/docs.
 * **Decision service** (pytest): feature windows evaluated at decision time, limits, flags and their
   expiry, step-up on new devices, degraded mode under a slow store, and the decision-log contract
   that Flink parses (also tested on the Java side). The Redis sink is tested against a real Redis.
+* **Model** (pytest, plus the full lifecycle on the fixture in CI): the served evaluator equals
+  LightGBM, metrics match their definitions, a model trained on shuffled labels is refused, promotion
+  and rollback, drift flags a shifted population, and the replayed log sees a burst only after the
+  pipeline lag.
 * **dbt** (DuckDB in CI, Trino in the stack): uniqueness, accepted values, positive amounts,
   double-entry balance, and closed-day reconciliation.
 
@@ -139,6 +145,7 @@ rules/         analyst rule contract (JSON Schema), starter library, conformance
 rules-service/ Python: rule lifecycle API, maker-checker, audit log, backtester
 decision-service/ Python: inline decision API, policy, decision log, load tester
 case-service/  Python: case queue and SLAs, verdicts to labels and account actions, outbox
+ml/            Python: training on the decision log, export, champion/challenger promotion, drift
 ledger/        Postgres double-entry ledger schema
 connect/       Debezium connector config
 dbt/           staging + gold models on Trino; DuckDB target for CI
