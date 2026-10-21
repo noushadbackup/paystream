@@ -7,6 +7,9 @@ against the ledger to the paisa.
 
 Everything runs on a laptop with Docker Compose.
 
+![Fraud Ops Console](docs/img/ops-console.png)
+<sub>The Fraud Ops Console in demo mode (`make demo`, no Docker needed). On the live stack it reads the lakehouse through Trino and refreshes every 5 s.</sub>
+
 ```mermaid
 flowchart TB
     gen[Event generator<br/>users, merchants, agents,<br/>late + duplicate events, fraud scenarios]
@@ -46,6 +49,7 @@ flowchart TB
 | Money correctness | Integer paisa everywhere; double-entry ledger with a deferred balance check; daily stream vs ledger reconciliation | [`ledger/`](ledger/001_schema.sql), [`recon_stream_vs_ledger`](dbt/models/marts/recon_stream_vs_ledger.sql) |
 | Reprocessing | Bronze keeps every record as received; Airflow rebuilds a day of silver from bronze, then gold | [`paystream_backfill`](airflow/dags/paystream_backfill.py) |
 | Operating it | Grafana: throughput, consumer lag, alert latency, checkpoints, watermark lag | [`monitoring/`](monitoring) |
+| Acting on it | Fraud Ops Console: live alert feed, alerts and payments per minute, reconciliation status, agents low on float, account lookup | [`dashboard/`](dashboard/app.py) |
 
 Design and tradeoffs: [docs/design.md](docs/design.md) and the [ADRs](docs/adr).
 
@@ -53,10 +57,14 @@ Design and tradeoffs: [docs/design.md](docs/design.md) and the [ADRs](docs/adr).
 
 Needs Docker with about 10 GB of memory for the stack, Java 17 and Python 3.11+ for tests.
 
+Just want to see it? `make demo` builds a demo dataset with the real generator and dbt models and
+opens the console at http://localhost:8501, with no Docker.
+
 ```bash
 make up          # starts the stack, creates topics, registers the CDC connector, submits both Flink jobs
 make load        # 1,000 payments/s for 10 minutes into Kafka and the ledger
 make sql         # Trino: SELECT * FROM silver.fraud_alerts ORDER BY detected_at DESC LIMIT 20;
+make console     # Fraud Ops Console on the live stack: http://localhost:8501
 make up-batch    # Airflow at http://localhost:8088 (nightly dbt build, backfill DAG)
 make bench       # RATE=5000 DURATION=1800, writes benchmarks/runs/<time>.json
 make bench CHAOS=1
@@ -92,6 +100,7 @@ ledger/        Postgres double-entry ledger schema
 connect/       Debezium connector config
 dbt/           staging + gold models on Trino; DuckDB target for CI
 airflow/       nightly build and backfill DAGs
+dashboard/     Fraud Ops Console (Streamlit), same SQL on Trino and DuckDB
 monitoring/    Prometheus scrape config, Grafana dashboard
 benchmarks/    measure.py and run_benchmark.sh
 docs/          design doc and ADRs

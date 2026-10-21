@@ -6,30 +6,56 @@ ledger as the generator's ledger sink does, and turns fraud labels into alerts.
 """
 
 import argparse
+import zlib
 from datetime import UTC, datetime
 
 import duckdb
+import pandas as pd
 
 from paystream_gen.population import Population
 from paystream_gen.traffic import Config, Simulator
+
+RULES = {
+    "velocity_burst": ("VELOCITY", 6),
+    "mule_ring": ("MULE_FAN_IN", 8),
+    "account_takeover": ("NEW_DEVICE_CASH_OUT", 1),
+    "agent_float_spike": ("AGENT_FLOAT_SPIKE", 25),
+}
+DETAILS = {
+    "VELOCITY": "{n} outgoing transfers in 60s",
+    "MULE_FAN_IN": "{n} distinct senders in 10 min",
+    "NEW_DEVICE_CASH_OUT": "large cash-out from a new device",
+    "AGENT_FLOAT_SPIKE": "{n} cash-outs in 10 min vs baseline",
+}
 
 
 def ts(ms: int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, UTC)
 
 
+def insert(con: duckdb.DuckDBPyConnection, table: str, rows: list[tuple]) -> None:
+    """Bulk insert through a DataFrame: orders of magnitude faster than executemany in DuckDB."""
+    cols = [r[0] for r in con.execute(f"describe {table}").fetchall()]
+    frame = pd.DataFrame(rows, columns=cols)  # noqa: F841 - DuckDB reads it by name below
+    con.execute(f"insert into {table} select * from frame")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="ci/ci.duckdb")
-    p.add_argument("--seconds", type=int, default=600)
+    p.add_argument("--seconds", type=int, default=1800)
     a = p.parse_args()
 
-    start = int(datetime(2026, 10, 1, 23, 55, tzinfo=UTC).timestamp() * 1000)  # crosses midnight
-    sim = Simulator(Population.build(20_000, 500, 200, seed=11), Config(rate_per_s=50, fraud_scale=20), seed=11)
+    start = int(datetime(2026, 10, 1, 23, 40, tzinfo=UTC).timestamp() * 1000)  # crosses midnight
+    sim = Simulator(Population.build(20_000, 500, 200, seed=11), Config(rate_per_s=50, fraud_scale=4), seed=11)
 
     payments, transfers, entries, alerts, seen, leaked = [], [], [], [], set(), 0
+    fraud_counts: dict[tuple[str, str], int] = {}
+    end = start + a.seconds * 1000
     for e in sim.run(start, a.seconds):
         ev = e.event
+        if ev["event_time"] >= end:  # scenarios scheduled past the end of the run
+            continue
         row = (ev["txn_id"], ts(ev["event_time"]), ev["txn_type"], ev["sender_id"], ev["receiver_id"],
                ev["amount_paisa"], ev["currency"], ev["device_id"], ev["district"], ev["status"],
                ev.get("channel"), ts(e.arrival_ms + (5 if e.is_duplicate else 0)))
@@ -45,29 +71,33 @@ def main() -> None:
             transfers.append((ev["txn_id"], ev["txn_type"], ev["amount_paisa"], ts(ev["event_time"]), posted))
             entries.append((ev["txn_id"], "D", ev["sender_id"], -ev["amount_paisa"], posted))
             entries.append((ev["txn_id"], "C", ev["receiver_id"], ev["amount_paisa"], posted))
-        if e.scenario:
-            alerts.append((f"{e.scenario}:{ev['txn_id']}", "VELOCITY" if e.scenario == "velocity_burst" else
-                           "MULE_FAN_IN" if e.scenario == "mule_ring" else
-                           "NEW_DEVICE_CASH_OUT" if e.scenario == "account_takeover" else "AGENT_FLOAT_SPIKE",
-                           ev["sender_id"], ev["txn_id"], ts(ev["event_time"]), ts(e.arrival_ms),
-                           ts(e.arrival_ms + 300), 1.2, e.scenario))
+        if e.scenario and not e.is_duplicate:
+            # one alert per incident, raised where the Flink rule would fire (see RuleConfig)
+            key = (e.scenario, e.subject)
+            fraud_counts[key] = fraud_counts.get(key, 0) + 1
+            rule, fires_at = RULES[e.scenario]
+            if fraud_counts[key] == fires_at:
+                latency_ms = 120 + zlib.crc32(ev["txn_id"].encode()) % 900
+                alerts.append((f"{rule}:{e.subject}:{ev['txn_id']}", rule, e.subject, ev["txn_id"],
+                               ts(ev["event_time"]), ts(e.arrival_ms), ts(e.arrival_ms + latency_ms),
+                               1.0 + zlib.crc32(e.subject.encode()) % 100 / 100, DETAILS[rule].format(n=fires_at)))
 
     con = duckdb.connect(a.out)
     con.execute("create schema if not exists silver")
     con.execute("""create or replace table silver.payments (txn_id varchar, event_time timestamptz, txn_type varchar,
         sender_id varchar, receiver_id varchar, amount_paisa bigint, currency varchar, device_id varchar,
         district varchar, status varchar, channel varchar, ingest_time timestamptz)""")
-    con.executemany("insert into silver.payments values (?,?,?,?,?,?,?,?,?,?,?,?)", payments)
+    insert(con, "silver.payments", payments)
     con.execute("""create or replace table silver.ledger_transfers (txn_id varchar, txn_type varchar,
         amount_paisa bigint, event_time timestamptz, posted_at timestamptz)""")
-    con.executemany("insert into silver.ledger_transfers values (?,?,?,?,?)", transfers)
+    insert(con, "silver.ledger_transfers", transfers)
     con.execute("""create or replace table silver.ledger_entries (txn_id varchar, leg varchar, account_id varchar,
         amount_paisa bigint, posted_at timestamptz)""")
-    con.executemany("insert into silver.ledger_entries values (?,?,?,?,?)", entries)
+    insert(con, "silver.ledger_entries", entries)
     con.execute("""create or replace table silver.fraud_alerts (alert_id varchar, rule varchar, account_id varchar,
         trigger_txn_id varchar, event_time timestamptz, ingest_time timestamptz, detected_at timestamptz,
         score double, details varchar)""")
-    con.executemany("insert into silver.fraud_alerts values (?,?,?,?,?,?,?,?,?)", alerts)
+    insert(con, "silver.fraud_alerts", alerts)
     print(f"fixture: {len(payments)} payments ({leaked} leaked retries), {len(transfers)} transfers, "
           f"{len(alerts)} alerts -> {a.out}")
 

@@ -217,6 +217,13 @@ services:
       - ./airflow/dags:/opt/airflow/dags:ro
       - ./dbt:/opt/paystream/dbt
 
+  ops-console:
+    build: { context: dashboard }
+    ports: ["8501:8501"]
+    depends_on: [trino]
+    environment:
+      TRINO_HOST: trino
+
   generator:
     build: { context: ., dockerfile: generator/Dockerfile }
     profiles: [load]

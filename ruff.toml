@@ -4,4 +4,4 @@ line-length = 110
 extend-select = ["I", "SIM", "UP"]
 
 [lint.isort]
-known-first-party = ["paystream_gen"]
+known-first-party = ["paystream_gen", "queries"]

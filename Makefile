@@ -48,8 +48,17 @@ test: ## All tests: generator, Flink (incl. Iceberg end-to-end), dbt on DuckDB
 	cd generator && $(PY) -m pytest -q
 	cd flink-jobs && mvn -q -B test
 	cd dbt && $(PY) ci/build_fixture.py && dbt build --profiles-dir . --target duckdb
+	$(PY) -m pytest -q dashboard/tests
+
+console: ## Fraud Ops Console on the live stack (http://localhost:8501)
+	$(COMPOSE) up -d --build ops-console
+
+demo: ## Fraud Ops Console on generated demo data, no Docker needed
+	pip install -q -e generator "dbt-core>=1.10,<2" dbt-duckdb -r dashboard/requirements.txt
+	cd dbt && $(PY) ci/build_fixture.py && dbt build --profiles-dir . --target duckdb -q
+	cd dashboard && PAYSTREAM_DUCKDB=../dbt/ci/ci.duckdb streamlit run app.py
 
 down: ## Stop everything and delete data volumes
 	$(COMPOSE) --profile batch --profile load down -v
 
-.PHONY: help up up-batch submit load bench chaos verify sql dbt schema-v1 test down
+.PHONY: help up up-batch submit load bench chaos verify sql dbt schema-v1 test console demo down
