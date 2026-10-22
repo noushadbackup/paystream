@@ -113,17 +113,22 @@ def fraud_quality(labels: list[dict], alerts: list[dict]) -> dict:
                             "recall": round(hit / len(accounts), 4) if accounts else None}
 
     unique_alerts = {a["alert_id"]: a for a in alerts}.values()
-    true_pos = sum(1 for a in unique_alerts if (rule_of(a), a["account_id"]) in labelled_accounts)
+    # an alert is right if its account is fraud of any kind: a takeover caught by the PIN rule still counts
+    fraud_accounts = {x["account_id"] for x in labels}
+    true_pos = sum(1 for a in unique_alerts if a["account_id"] in fraud_accounts)
+    same_scenario = sum(1 for a in unique_alerts if (rule_of(a), a["account_id"]) in labelled_accounts)
     per_rule = defaultdict(int)
     for a in unique_alerts:
         per_rule[rule_of(a)] += 1
-    latency = [(a["detected_at"] - a["ingest_time"]).total_seconds() * 1000 for a in unique_alerts]
+    latency = [(a["detected_at"] - a["ingest_time"]).total_seconds() * 1000 for a in unique_alerts
+               if "detected_at" in a]  # a replay has no meaningful wall-clock latency
     return {
         "recall": recall,
         "alerts": len(unique_alerts),
         "alerts_per_rule": dict(sorted(per_rule.items())),
         "shadow_alerts": len({a["alert_id"] for a in shadow}),
         "precision": round(true_pos / len(unique_alerts), 4) if unique_alerts else None,
+        "precision_same_scenario": round(same_scenario / len(unique_alerts), 4) if unique_alerts else None,
         "alert_latency_ms": {"p50": pct(latency, 0.5), "p95": pct(latency, 0.95), "p99": pct(latency, 0.99)},
     }
 

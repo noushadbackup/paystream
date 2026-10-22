@@ -13,3 +13,4 @@ benchmarks/runs/
 .vscode/
 dbt/ci/*.duckdb*
 dbt/.user.yml
+benchmarks/replay-work/

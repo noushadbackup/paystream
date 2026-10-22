@@ -1,0 +1,89 @@
+{
+  "kind": "replay",
+  "note": "OnlineFeatures: buckets, clock and flush flag in one value per key",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "vcpus": 4,
+    "ram_gb": 15.7,
+    "os": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39"
+  },
+  "input": {
+    "events": 3617317,
+    "distinct_txn": 3599316,
+    "duplicates": 18001,
+    "simulated_minutes": 52.9,
+    "fraud_labels": 1286
+  },
+  "flink": {
+    "parallelism": 4,
+    "net_runtime_ms": 629826,
+    "wall_ms": 632116,
+    "online_store": "redis",
+    "processors": 4,
+    "max_heap_mb": 4096,
+    "counts": {
+      "bronze_rows": 3617317,
+      "silver_rows": 3599316,
+      "silver_distinct_txn": 3599316,
+      "late_rows": 24845,
+      "alert_rows": 5753,
+      "kpi_txn_sum": 3574471
+    }
+  },
+  "throughput_events_per_s": 5743,
+  "correctness": {
+    "bronze_equals_input": true,
+    "silver_equals_distinct_input": true,
+    "silver_has_no_duplicates": true
+  },
+  "quality": {
+    "recall": {
+      "velocity_burst": {
+        "incidents": 49,
+        "detected": 49,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 57,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "mule_ring": {
+        "incidents": 16,
+        "detected": 16,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 3,
+        "detected": 1,
+        "recall": 0.3333
+      },
+      "pin_brute_force": {
+        "incidents": 31,
+        "detected": 31,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 11,
+        "detected": 10,
+        "recall": 0.9091
+      },
+      "structuring": {
+        "incidents": 3,
+        "detected": 0,
+        "recall": 0.0
+      }
+    },
+    "alerts": 5753,
+    "alerts_per_rule": {
+      "AGENT_FLOAT_SPIKE": 9,
+      "MULE_FAN_IN": 17,
+      "VELOCITY": 5524,
+      "cash-in-structuring": 10,
+      "device-farm": 11,
+      "failed-pin-burst": 182
+    },
+    "shadow_alerts": 0,
+    "precision": 0.0209
+  }
+}

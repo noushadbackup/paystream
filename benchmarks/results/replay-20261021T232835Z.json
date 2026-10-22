@@ -1,0 +1,132 @@
+{
+  "kind": "replay",
+  "note": "agent spike: exact Poisson tail, alpha 1e-6",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "vcpus": 4,
+    "ram_gb": 15.7,
+    "os": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39"
+  },
+  "input": {
+    "events": 7239318,
+    "distinct_txn": 7203302,
+    "duplicates": 36016,
+    "simulated_minutes": 87.6,
+    "fraud_labels": 2921,
+    "users": 5000000,
+    "history_hours": 2
+  },
+  "bootstrap_seconds": 315,
+  "flink": {
+    "parallelism": 4,
+    "net_runtime_ms": 1641134,
+    "wall_ms": 1643192,
+    "online_store": "redis",
+    "from_savepoint": true,
+    "processors": 4,
+    "max_heap_mb": 3072,
+    "counts": {
+      "bronze_rows": 7239318,
+      "silver_rows": 7203302,
+      "silver_distinct_txn": 7203302,
+      "late_rows": 50902,
+      "alert_rows": 403,
+      "kpi_txn_sum": 7152400
+    }
+  },
+  "throughput_events_per_s": 4411,
+  "correctness": {
+    "bronze_equals_input": true,
+    "silver_equals_distinct_input": true,
+    "silver_has_no_duplicates": true
+  },
+  "quality": {
+    "recall": {
+      "velocity_burst": {
+        "incidents": 132,
+        "detected": 132,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 111,
+        "detected": 82,
+        "recall": 0.7387
+      },
+      "mule_ring": {
+        "incidents": 22,
+        "detected": 22,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 14,
+        "detected": 11,
+        "recall": 0.7857
+      },
+      "pin_brute_force": {
+        "incidents": 44,
+        "detected": 43,
+        "recall": 0.9773
+      },
+      "device_farm": {
+        "incidents": 27,
+        "detected": 25,
+        "recall": 0.9259
+      },
+      "structuring": {
+        "incidents": 11,
+        "detected": 0,
+        "recall": 0.0
+      }
+    },
+    "alerts": 403,
+    "alerts_per_rule": {
+      "AGENT_FLOAT_SPIKE": 24,
+      "MULE_FAN_IN": 26,
+      "NEW_DEVICE_CASH_OUT": 120,
+      "VELOCITY": 163,
+      "device-farm": 27,
+      "failed-pin-burst": 43
+    },
+    "shadow_alerts": 0,
+    "precision": 0.8313,
+    "precision_same_scenario": 0.8213,
+    "warmup_minutes": 30,
+    "recall_scored": {
+      "velocity_burst": {
+        "incidents": 65,
+        "detected": 65,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 59,
+        "detected": 48,
+        "recall": 0.8136
+      },
+      "mule_ring": {
+        "incidents": 10,
+        "detected": 10,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 9,
+        "detected": 9,
+        "recall": 1.0
+      },
+      "pin_brute_force": {
+        "incidents": 20,
+        "detected": 19,
+        "recall": 0.95
+      },
+      "device_farm": {
+        "incidents": 17,
+        "detected": 15,
+        "recall": 0.8824
+      },
+      "structuring": {
+        "incidents": 1,
+        "detected": 0,
+        "recall": 0.0
+      }
+    }
+  }
+}
