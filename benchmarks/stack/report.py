@@ -2,7 +2,7 @@
 
   report.py sample --job ID --bootstrap B --out samples.jsonl   every 5 s until killed
   report.py drain  --job ID [--timeout 900]                     waits until the Kafka backlog is consumed
-  report.py final  --run DIR --bootstrap B --registry R ...     prints the result JSON
+  report.py final  --run DIR --bootstrap B ...                 prints the result JSON
 
 Samples come from the Flink REST API (records/s out of the Kafka source, records still pending in
 Kafka per the source's own metric, checkpoints) so no Prometheus is needed.
@@ -99,26 +99,26 @@ def topic_end_offsets(bootstrap: str, topic: str) -> int:
     return total
 
 
-def read_topic(bootstrap: str, registry: str, topic: str, fields: list[str]) -> list[dict]:
-    """Every record of a topic (Avro via the registry), keeping only `fields` plus the Kafka timestamp."""
-    from confluent_kafka import Consumer, TopicPartition
-    from confluent_kafka.schema_registry import SchemaRegistryClient
-    from confluent_kafka.schema_registry.avro import AvroDeserializer
-    from confluent_kafka.serialization import MessageField, SerializationContext
+def read_topic(bootstrap: str, topic: str, schema: Path, fields: list[str]) -> list[dict]:
+    """Every record of a topic, keeping `fields` and the Kafka timestamp. Decoded with the schema file the
+    producer wrote with (the generator's), after the 5-byte registry header, so it needs no registry."""
+    import io
 
-    deser = AvroDeserializer(SchemaRegistryClient({"url": registry}))
+    import fastavro
+    from confluent_kafka import Consumer, TopicPartition
+
+    parsed = fastavro.parse_schema(json.loads(schema.read_text()))
     c = Consumer({"bootstrap.servers": bootstrap, "group.id": f"bench-{time.time_ns()}",
                   "enable.auto.commit": False})
     parts = c.list_topics(topic, timeout=10).topics[topic].partitions
     ends = {p: c.get_watermark_offsets(TopicPartition(topic, p), timeout=10)[1] for p in parts}
     c.assign([TopicPartition(topic, p, 0) for p in parts])
-    ctx = SerializationContext(topic, MessageField.VALUE)
     out, done = [], {p for p, end in ends.items() if end == 0}
     while len(done) < len(parts):
         for msg in c.consume(10_000, timeout=1.0):
             if msg.error():
                 continue
-            v = deser(msg.value(), ctx)
+            v = fastavro.schemaless_reader(io.BytesIO(msg.value()[5:]), parsed)
             row = {f: v.get(f) for f in fields}
             row["_ts"] = msg.timestamp()[1]
             out.append(row)
@@ -136,8 +136,9 @@ def final(a) -> None:
     chaos = [json.loads(x) for x in (run / "chaos.jsonl").read_text().splitlines()] \
         if (run / "chaos.jsonl").exists() else []
 
-    events = read_topic(a.bootstrap, a.registry, "payments.events", ["txn_id"])
-    labels = read_topic(a.bootstrap, a.registry, "fraud.labels", ["txn_id", "scenario", "account_id"])
+    schemas = Path(__file__).resolve().parents[2] / "schemas"
+    events = read_topic(a.bootstrap, "payments.events", schemas / "payment_event.avsc", ["txn_id"])
+    labels = read_topic(a.bootstrap, "fraud.labels", schemas / "fraud_label.avsc", ["txn_id", "scenario", "account_id"])
     produced = len(events)
     distinct = len({e["txn_id"] for e in events})
     first_ts = min(e["_ts"] for e in events)
@@ -155,6 +156,15 @@ def final(a) -> None:
     durations = [c["duration_ms"] for c in cps.values()]
     latency = [x["latency_ms"] for x in alerts if "latency_ms" in x and not x.get("shadow")]
     restarts = max((s.get("restarts") or 0 for s in samples), default=0)
+    by_window: dict[int, list[int]] = {}
+    for x in alerts:
+        if "detected_at_ms" in x and not x.get("shadow"):
+            by_window.setdefault((x["detected_at_ms"] - first_ts) // 600_000, []).append(x["latency_ms"])
+    cp_by_window: dict[int, list[int]] = {}
+    for c in cps.values():
+        s = next((s for s in samples if s.get("checkpoint", {}).get("id") == c["id"]), None)
+        if s:
+            cp_by_window.setdefault(int((s["t"] * 1000 - first_ts) // 600_000), []).append(c["duration_ms"])
 
     quality = fraud_quality(labels, alerts)
     quality.pop("alert_latency_ms")
@@ -181,6 +191,8 @@ def final(a) -> None:
         "consumer_lag_records": {"p50": pct(pending, 0.5), "p95": pct(pending, 0.95), "max": max(pending, default=None)},
         "alert_latency_ms": {"alerts": len(latency), "p50": pct(latency, 0.5), "p95": pct(latency, 0.95),
                              "p99": pct(latency, 0.99), "max": max(latency, default=None)},
+        "by_10_minutes": [{"minutes": f"{10 * w}-{10 * w + 10}", "alerts": len(v), "alert_latency_p95_ms": pct(v, 0.95),
+                           "checkpoint_ms_max": max(cp_by_window.get(w, [0]))} for w, v in sorted(by_window.items())],
         "silver_freshness_ms": {k: fresh.get(k) for k in ("commits", "p50_ms", "p95_ms", "max_ms", "definition")},
         "checkpoints": {"completed": len(cps), "failed": max((s.get("checkpoints_failed") or 0 for s in samples), default=0),
                         "duration_ms_p50": pct(durations, 0.5), "duration_ms_max": max(durations, default=None),
@@ -210,7 +222,6 @@ def main() -> None:
     f = sub.add_parser("final")
     f.add_argument("--run", required=True)
     f.add_argument("--bootstrap", required=True)
-    f.add_argument("--registry", required=True)
     for name in ("rate", "duration", "users", "partitions", "parallelism", "chaos"):
         f.add_argument(f"--{name}", type=int)
     f.add_argument("--note", default="")

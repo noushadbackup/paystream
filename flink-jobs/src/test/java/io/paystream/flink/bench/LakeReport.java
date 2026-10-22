@@ -97,7 +97,10 @@ public final class LakeReport {
                 a.put("shadow", Boolean.TRUE.equals(r.getField(4)));
                 Instant ingest = (Instant) r.getField(5);
                 Instant detected = (Instant) r.getField(6);
-                if (latency && ingest != null && detected != null) a.put("latency_ms", detected.toEpochMilli() - ingest.toEpochMilli());
+                if (latency && ingest != null && detected != null) {
+                    a.put("detected_at_ms", detected.toEpochMilli());
+                    a.put("latency_ms", detected.toEpochMilli() - ingest.toEpochMilli());
+                }
                 w.write(json.writeValueAsString(a));
                 w.newLine();
             }

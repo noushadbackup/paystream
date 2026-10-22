@@ -1,0 +1,200 @@
+{
+  "kind": "stack",
+  "note": "steady: 2,000/s for 60 min, 2 h of device history bootstrapped, glibc malloc. From minute ~48 checkpoints slowed to 18-25 s and the job fell behind; the TaskManager (8.1 GB RSS for a 6.5 GB budget) was OOM-killed by the container's memory limit during the final stop-with-savepoint, after the job had drained and committed",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "vcpus": 4,
+    "ram_gb": 15.7,
+    "os": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39"
+  },
+  "setup": {
+    "kafka": "3.8.1, one broker (KRaft)",
+    "flink": "1.20.1 standalone, 1 JobManager + 1 TaskManager",
+    "state_backend": "rocksdb, incremental checkpoints every 10 s, exactly-once",
+    "lakehouse": "Iceberg, Hadoop catalog on local disk",
+    "online_store": "Redis",
+    "partitions": 8,
+    "parallelism": 4,
+    "users": 5000000,
+    "target_rate": 2000,
+    "duration_s": 3600,
+    "chaos": [],
+    "bootstrap_seconds": 170,
+    "python": "3.13.16"
+  },
+  "throughput": {
+    "produced_events": 7238698,
+    "produced_per_s": 2010,
+    "tail_events_after_duration": 1973,
+    "flink_source_per_s_mean": 1996.8,
+    "flink_source_per_s_max": 2023.5
+  },
+  "consumer_lag_records": {
+    "p50": 0.0,
+    "p95": 1485.0,
+    "max": 12307.0
+  },
+  "alert_latency_ms": {
+    "alerts": 397,
+    "p50": 148,
+    "p95": 22137,
+    "p99": 40668,
+    "max": 44415
+  },
+  "by_10_minutes": [
+    {
+      "minutes": "0-10",
+      "alerts": 48,
+      "alert_latency_p95_ms": 213,
+      "checkpoint_ms_max": 1238
+    },
+    {
+      "minutes": "10-20",
+      "alerts": 60,
+      "alert_latency_p95_ms": 229,
+      "checkpoint_ms_max": 1578
+    },
+    {
+      "minutes": "20-30",
+      "alerts": 72,
+      "alert_latency_p95_ms": 295,
+      "checkpoint_ms_max": 1427
+    },
+    {
+      "minutes": "30-40",
+      "alerts": 75,
+      "alert_latency_p95_ms": 260,
+      "checkpoint_ms_max": 1655
+    },
+    {
+      "minutes": "40-50",
+      "alerts": 62,
+      "alert_latency_p95_ms": 1055,
+      "checkpoint_ms_max": 20284
+    },
+    {
+      "minutes": "50-60",
+      "alerts": 65,
+      "alert_latency_p95_ms": 37527,
+      "checkpoint_ms_max": 24794
+    },
+    {
+      "minutes": "60-70",
+      "alerts": 15,
+      "alert_latency_p95_ms": 42860,
+      "checkpoint_ms_max": 25136
+    }
+  ],
+  "silver_freshness_ms": {
+    "commits": 341,
+    "p50_ms": 11460,
+    "p95_ms": 40067,
+    "max_ms": 82310,
+    "definition": "per commit: commit time minus the earliest ingest_time among the rows it made visible"
+  },
+  "checkpoints": {
+    "completed": 348,
+    "failed": 3,
+    "duration_ms_p50": 1220,
+    "duration_ms_max": 25136,
+    "state_bytes_last": 1556177390
+  },
+  "restarts": 0,
+  "exactly_once": {
+    "kafka_records": 7238698,
+    "bronze_rows": 7238698,
+    "bronze_equals_kafka": true,
+    "distinct_txn_in_kafka": 7202682,
+    "silver_rows": 7202682,
+    "silver_equals_distinct": true
+  },
+  "quality": {
+    "recall": {
+      "velocity_burst": {
+        "incidents": 132,
+        "detected": 132,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 111,
+        "detected": 92,
+        "recall": 0.8288
+      },
+      "mule_ring": {
+        "incidents": 22,
+        "detected": 22,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 14,
+        "detected": 10,
+        "recall": 0.7143
+      },
+      "pin_brute_force": {
+        "incidents": 44,
+        "detected": 44,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 27,
+        "detected": 19,
+        "recall": 0.7037
+      },
+      "structuring": {
+        "incidents": 6,
+        "detected": 0,
+        "recall": 0.0
+      }
+    },
+    "alerts": 397,
+    "alerts_per_rule": {
+      "AGENT_FLOAT_SPIKE": 19,
+      "MULE_FAN_IN": 23,
+      "NEW_DEVICE_CASH_OUT": 131,
+      "VELOCITY": 161,
+      "device-farm": 19,
+      "failed-pin-burst": 44
+    },
+    "shadow_alerts": 0,
+    "precision": 0.8262,
+    "precision_same_scenario": 0.8136,
+    "warmup_minutes": 30,
+    "recall_scored": {
+      "velocity_burst": {
+        "incidents": 65,
+        "detected": 65,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 59,
+        "detected": 50,
+        "recall": 0.8475
+      },
+      "mule_ring": {
+        "incidents": 9,
+        "detected": 9,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 8,
+        "detected": 8,
+        "recall": 1.0
+      },
+      "pin_brute_force": {
+        "incidents": 20,
+        "detected": 20,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 9,
+        "detected": 9,
+        "recall": 1.0
+      },
+      "structuring": {
+        "incidents": 0,
+        "detected": 0,
+        "recall": null
+      }
+    }
+  }
+}

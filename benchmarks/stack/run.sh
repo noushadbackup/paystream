@@ -126,7 +126,11 @@ execution.checkpointing.dir: file://$RUN/checkpoints
 execution.checkpointing.savepoint-dir: file://$RUN/savepoints
 restart-strategy.type: exponential-delay
 EOF
-"$FLINK_HOME/bin/start-cluster.sh" > /dev/null
+# jemalloc for the Flink processes, as the official Flink image does: with glibc malloc, RocksDB's native
+# memory fragments well past its managed budget (first run: 8.1 GB RSS for a 6.5 GB TaskManager)
+JEMALLOC=${JEMALLOC-/usr/lib/x86_64-linux-gnu/libjemalloc.so.2}
+[[ -f "$JEMALLOC" ]] && PRELOAD="$JEMALLOC" || PRELOAD=""
+LD_PRELOAD="$PRELOAD" "$FLINK_HOME/bin/start-cluster.sh" > /dev/null
 until curl -sf localhost:18082/taskmanagers | grep -q '"slotsNumber"'; do sleep 1; done
 
 FROM=()
@@ -168,7 +172,7 @@ if [[ "$CHAOS" == "1" ]]; then
     echo "{\"event\": \"kill_taskmanager\", \"at\": $(date +%s)}" >> "$RUN/chaos.jsonl"
     kill -9 "$TM"
     sleep 10
-    "$FLINK_HOME/bin/taskmanager.sh" start > /dev/null
+    LD_PRELOAD="$PRELOAD" "$FLINK_HOME/bin/taskmanager.sh" start > /dev/null
   done
 fi
 wait "$GEN"
@@ -176,7 +180,8 @@ wait "$GEN"
 log "generator done; waiting for the job to drain"
 $PY benchmarks/stack/report.py drain --job "$JOB" --timeout 900
 log "stopping with a final savepoint (commits the last Iceberg files)"
-"$FLINK_HOME/bin/flink" stop "$JOB" > "$RUN/stop.log" 2>&1
+"$FLINK_HOME/bin/flink" stop "$JOB" > "$RUN/stop.log" 2>&1 \
+  || log "stop-with-savepoint failed (stop.log); the drained data was committed by the checkpoints before it"
 kill "$SAMPLER" 2>/dev/null || true
 
 log "reading the lakehouse"
@@ -185,7 +190,7 @@ java -Xmx3g $JAVA_OPTS -cp "$CP" io.paystream.flink.bench.LakeReport --warehouse
   --work "$RUN" --freshness > "$RUN/lake-report.log" 2>&1 || { tail -30 "$RUN/lake-report.log"; exit 1; }
 
 OUT="benchmarks/results/stack-$STAMP.json"
-$PY benchmarks/stack/report.py final --run "$RUN" --bootstrap $BOOT --registry $REG --rate "$RATE" \
+$PY benchmarks/stack/report.py final --run "$RUN" --bootstrap $BOOT --rate "$RATE" \
   --duration "$DURATION" --users "$USERS" --partitions "$PARTITIONS" --parallelism "$PARALLELISM" \
   --chaos "$CHAOS" --warmup-minutes "${WARMUP_MINUTES:-30}" --note "${NOTE:-}" > "$OUT"
 log "report: $OUT"
