@@ -21,7 +21,7 @@ up-batch: ## Also start Airflow (http://localhost:8088)
 
 submit: ## Submit the payments job and the ledger CDC job
 	$(COMPOSE) exec jobmanager flink run -d -c io.paystream.flink.PaymentsJob $(JAR)
-	$(COMPOSE) exec jobmanager flink run -d -c io.paystream.flink.LedgerCdcJob $(JAR)
+	$(COMPOSE) exec jobmanager flink run -d -p 1 -c io.paystream.flink.LedgerCdcJob $(JAR)
 
 load: ## Generate 1,000 events/s for 10 minutes (into Kafka and the ledger)
 	$(COMPOSE) --profile load run --rm generator --sink kafka --bootstrap kafka:9092 \

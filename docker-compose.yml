@@ -8,10 +8,22 @@ x-s3-env: &s3-env
 
 x-flink-conf: &flink-conf |
   jobmanager.rpc.address: jobmanager
-  taskmanager.numberOfTaskSlots: 4
+  # 4 slots for the payments job + 1 for the ledger CDC job (submitted with -p 1). Managed memory is
+  # split per slot, so the payments job gets 4/5 of it.
+  taskmanager.numberOfTaskSlots: 5
   parallelism.default: 4
   state.backend.type: rocksdb
   state.backend.incremental: true
+  # RocksDB's working dir is scratch (durability is the checkpoint in S3), so keep it on tmpfs: on
+  # Docker Desktop's virtual disk every fsync costs ~12 ms and each incremental checkpoint flushes
+  # and syncs hundreds of small SST files, which stalled the job at 1,000 events/s.
+  state.backend.rocksdb.localdir: /tmp/rocksdb
+  # With little RocksDB memory, memtables are tiny and one compaction thread saturates, so writes
+  # stall and operators block in put. More background threads, dynamic level sizing and timers on
+  # the heap (one timer per account flush) keep it moving.
+  state.backend.rocksdb.thread.num: 4
+  state.backend.rocksdb.compaction.level.use-dynamic-size: true
+  state.backend.rocksdb.timer-service.factory: HEAP
   execution.checkpointing.dir: s3://checkpoints/flink
   execution.checkpointing.savepoint-dir: s3://checkpoints/savepoints
   s3.endpoint: http://minio:9000
@@ -23,7 +35,9 @@ x-flink-conf: &flink-conf |
   metrics.reporter.prom.port: 9249
   metrics.latency.interval: 0
   jobmanager.memory.process.size: 1600m
-  taskmanager.memory.process.size: 4096m
+  # As much as fits in a 12 GB Docker Desktop VM with ~1.5 GB to spare; managed (RocksDB) is ~40%.
+  taskmanager.memory.process.size: 5120m
+  taskmanager.memory.managed.size: 2048m
 
 services:
   kafka:
@@ -118,7 +132,9 @@ services:
     restart: "no"
 
   minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    # MinIO stopped publishing images (Docker Hub repo gone, quay.io needs auth); pgsty builds the
+    # same upstream source with the same entrypoint, so the command and healthcheck are unchanged.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     ports: ["9000:9000", "9001:9001"]
     command: server /data --console-address :9001
     environment:
@@ -131,7 +147,7 @@ services:
       retries: 12
 
   minio-init:
-    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    image: pgsty/mc:RELEASE.2026-10-18T00-00-00Z
     depends_on: { minio: { condition: service_healthy } }
     entrypoint: >
       sh -c "mc alias set local http://minio:9000 minio minio12345 &&
@@ -148,10 +164,12 @@ services:
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
-      CATALOG_URI: jdbc:sqlite:file:/catalog/iceberg.db
+      # The image runs as uid 1000 and has no /catalog dir, so a volume mounted there is root-owned and
+      # SQLite cannot create the file. /home/iceberg exists and is owned by that user.
+      CATALOG_URI: jdbc:sqlite:file:/home/iceberg/iceberg.db
       CATALOG_JDBC_USER: user
       CATALOG_JDBC_PASSWORD: password
-    volumes: ["catalog-data:/catalog"]
+    volumes: ["catalog-data:/home/iceberg"]
 
   jobmanager:
     build: { context: ., dockerfile: flink-jobs/Dockerfile }
@@ -169,6 +187,7 @@ services:
     image: paystream/flink:local
     command: taskmanager
     depends_on: [jobmanager]
+    tmpfs: ["/tmp/rocksdb:size=3g,mode=1777"]
     environment:
       <<: *s3-env
       FLINK_PROPERTIES: *flink-conf
@@ -178,7 +197,8 @@ services:
     image: trinodb/trino:463
     ports: ["8080:8080"]
     depends_on: [iceberg-rest]
-    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
+    # Trino sizes its heap at 80% of the RAM it sees, i.e. of the whole Docker VM: cap it at 1 GB.
+    volumes: ["./trino/catalog:/etc/trino/catalog:ro", "./trino/jvm.config:/etc/trino/jvm.config:ro"]
 
   prometheus:
     image: prom/prometheus:v2.55.0

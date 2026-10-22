@@ -1,0 +1,66 @@
+{
+  "started_at": "2026-10-22T09:05:42Z",
+  "fraud": {
+    "recall": {
+      "velocity_burst": {
+        "incidents": 32,
+        "detected": 32,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 25,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "mule_ring": {
+        "incidents": 4,
+        "detected": 4,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 3,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "pin_brute_force": {
+        "incidents": 18,
+        "detected": 18,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 3,
+        "detected": 3,
+        "recall": 1.0
+      },
+      "structuring": {
+        "incidents": 2,
+        "detected": 0,
+        "recall": 0.0
+      }
+    },
+    "alerts": 60,
+    "alerts_per_rule": {
+      "MULE_FAN_IN": 4,
+      "VELOCITY": 35,
+      "device-farm": 3,
+      "failed-pin-burst": 18
+    },
+    "shadow_alerts": 0,
+    "precision": 0.95,
+    "precision_same_scenario": 0.95,
+    "alert_latency_ms": {
+      "p50": 136.0,
+      "p95": 8613.0,
+      "p99": 21483.0
+    }
+  },
+  "exactly_once": {
+    "kafka_records": 452769,
+    "bronze_rows": 452769,
+    "silver_rows": 450475,
+    "silver_distinct_txn_ids": 450475,
+    "bronze_distinct_txn_ids": 450475,
+    "no_loss_no_dup_in_bronze": true,
+    "silver_is_deduplicated": true
+  }
+}

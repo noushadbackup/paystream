@@ -1,0 +1,78 @@
+{
+  "started_at": "2026-10-22T07:34:27Z",
+  "throughput_events_per_s": {
+    "mean": 568.9,
+    "max": 1524.5
+  },
+  "consumer_lag_records": {
+    "p95": 4700829.0,
+    "max": 4909878.0
+  },
+  "silver_freshness_s": {
+    "p50": 480.45723938941956,
+    "p95": 977.5436913967133
+  },
+  "checkpoint_duration_ms": 117729.0,
+  "checkpoint_size_bytes": 224809521.0,
+  "fraud": {
+    "recall": {
+      "velocity_burst": {
+        "incidents": 37,
+        "detected": 6,
+        "recall": 0.1622
+      },
+      "account_takeover": {
+        "incidents": 49,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "mule_ring": {
+        "incidents": 9,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "agent_float_spike": {
+        "incidents": 3,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "pin_brute_force": {
+        "incidents": 18,
+        "detected": 1,
+        "recall": 0.0556
+      },
+      "device_farm": {
+        "incidents": 8,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "structuring": {
+        "incidents": 1,
+        "detected": 0,
+        "recall": 0.0
+      }
+    },
+    "alerts": 4780,
+    "alerts_per_rule": {
+      "VELOCITY": 4779,
+      "failed-pin-burst": 1
+    },
+    "shadow_alerts": 0,
+    "precision": 0.0033,
+    "precision_same_scenario": 0.0017,
+    "alert_latency_ms": {
+      "p50": 163204.0,
+      "p95": 930655.0,
+      "p99": 1106676.0
+    }
+  },
+  "exactly_once": {
+    "kafka_records": 6028702,
+    "bronze_rows": 813671,
+    "silver_rows": 809665,
+    "silver_distinct_txn_ids": 809665,
+    "bronze_distinct_txn_ids": 809665,
+    "no_loss_no_dup_in_bronze": false,
+    "silver_is_deduplicated": true
+  }
+}
