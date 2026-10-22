@@ -19,8 +19,8 @@ public class RuleConfig implements Serializable {
     /** A device stays "new" for this long after first use, so a second cash-out is caught too. */
     public Duration newDeviceWindow = Duration.ofHours(1);
 
-    /** Agent cash-out count in 10 minutes vs the agent's own baseline: alert above mean + k * sqrt(mean). */
-    public double agentSpikeSigma = 4.0;
+    /** Agent cash-out count in 10 minutes vs the agent's own baseline: alert when its Poisson tail is below this. */
+    public double agentSpikeAlpha = 1e-6;
     public int agentSpikeMinCount = 20;
     /** Minutes of history an agent needs before its baseline is trusted. */
     public int agentWarmupMinutes = 20;
@@ -36,7 +36,7 @@ public class RuleConfig implements Serializable {
         c.muleWindow = Duration.ofSeconds(params.getLong("muleWindowSec", c.muleWindow.toSeconds()));
         c.newDeviceMinPaisa = params.getLong("newDeviceMinPaisa", c.newDeviceMinPaisa);
         c.newDeviceWindow = Duration.ofSeconds(params.getLong("newDeviceWindowSec", c.newDeviceWindow.toSeconds()));
-        c.agentSpikeSigma = params.getDouble("agentSpikeSigma", c.agentSpikeSigma);
+        c.agentSpikeAlpha = params.getDouble("agentSpikeAlpha", c.agentSpikeAlpha);
         c.agentSpikeMinCount = params.getInt("agentSpikeMinCount", c.agentSpikeMinCount);
         c.agentWarmupMinutes = params.getInt("agentWarmupMinutes", c.agentWarmupMinutes);
         c.cooldown = Duration.ofSeconds(params.getLong("cooldownSec", c.cooldown.toSeconds()));

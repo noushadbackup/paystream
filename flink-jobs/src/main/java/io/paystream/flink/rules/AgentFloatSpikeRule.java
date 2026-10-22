@@ -17,7 +17,13 @@ import org.apache.flink.util.Collector;
  *
  * <p>A fixed threshold does not work for agents: a busy Dhaka agent does more in an hour than a rural
  * agent in a week. Each agent is compared with its own previous hour, treating the 10-minute count
- * as roughly Poisson: alert when it exceeds mean + k * sqrt(mean), and at least a minimum count.
+ * as Poisson with the agent's hourly rate: alert when a count this high would happen by chance with
+ * probability below {@code agentSpikeAlpha}, and at least a minimum count.
+ *
+ * <p>Why an exact tail and so small an alpha: the rule tests every agent on every cash-out, so
+ * the false alarm rate is per test times tests. A normal approximation (mean + 4 sigma) put the bar
+ * at 24 for an agent averaging 11, and on 20,000 agents it raised about 160 false alerts an hour in
+ * the replay benchmark. Alpha 1e-6 on the exact tail asks for 31, still well under a real spike.
  */
 public class AgentFloatSpikeRule extends FraudRule {
     private static final long MINUTE = 60_000L;
@@ -57,11 +63,28 @@ public class AgentFloatSpikeRule extends FraudRule {
         if (historyMinutes < cfg.agentWarmupMinutes) return;
 
         double baseline = (double) history * CURRENT_MINUTES / historyMinutes;
-        double threshold = Math.max(cfg.agentSpikeMinCount, baseline + cfg.agentSpikeSigma * Math.sqrt(baseline));
-        if (current > threshold) {
-            alert(p, current / threshold,
-                    String.format("%d cash-outs in 10 min vs baseline %.1f", current, baseline), out);
+        if (current < cfg.agentSpikeMinCount) return;
+        double pValue = poissonTail(current, baseline);
+        if (pValue < cfg.agentSpikeAlpha) {
+            double score = pValue > 0 ? Math.log10(pValue) / Math.log10(cfg.agentSpikeAlpha) : 10.0;
+            alert(p, score, String.format("%d cash-outs in 10 min vs baseline %.1f (p=%.1e)", current, baseline, pValue),
+                    out);
         }
+    }
+
+    /** P(X >= k) for X ~ Poisson(lambda). */
+    static double poissonTail(long k, double lambda) {
+        if (k <= 0) return 1.0;
+        if (lambda <= 0) return 0.0;
+        double logFact = 0;
+        for (long i = 2; i <= k; i++) logFact += Math.log(i);
+        double term = Math.exp(-lambda + k * Math.log(lambda) - logFact);
+        double sum = 0;
+        for (long i = k; term > 1e-300 && (sum == 0 || term > sum * 1e-12); i++) {
+            sum += term;
+            term *= lambda / (i + 1);
+        }
+        return Math.min(1.0, sum);
     }
 
     @Override
