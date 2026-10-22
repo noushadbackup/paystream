@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
@@ -27,6 +28,13 @@ import org.apache.flink.util.Collector;
  * <p>Per key (for example {@code sender_id|U00042}) it keeps the matching payments of the last
  * {@code max(window)} of the rules that group by that field, bucketed by event time. Each arriving
  * payment is checked against every live rule it matches, on arrival, like the built-in rules.
+ *
+ * <p>Detection does not depend on arrival order. A payment can arrive after later ones for the same
+ * key: they come through different Kafka partitions (three agents' cash-ins into one account), and
+ * partitions lag by different amounts after a restart or a rebalance. So an arrival is checked
+ * against every window it falls in, not only its own: the windows ending at each matching payment
+ * in {@code [t, t + window)}. The replay benchmark found the gap: a structuring pattern whose middle
+ * cash-in arrived after its last was never flagged.
  * When a rule's window grows, retention grows with it; when the last rule on a field is disabled,
  * that field's state is dropped at the next timer.
  */
@@ -72,9 +80,26 @@ public class DynamicRuleEvaluator extends KeyedBroadcastProcessFunction<String, 
         ctx.timerService().registerEventTimeTimer(roundUp(p.eventTime + maxWindow));
 
         for (RuleDef r : rules) {
-            double observed = aggregate(r, p.eventTime);
-            if (r.crosses(observed)) alert(r, k, p, observed, out);
+            for (Map.Entry<Long, Payment> end : windowEnds(r, p).entrySet()) {
+                double observed = aggregate(r, end.getKey());
+                if (r.crosses(observed)) alert(r, k, end.getValue(), observed, out);
+            }
         }
+    }
+
+    /**
+     * The windows {@code p} falls in: one ending at {@code p} and one ending at each later matching
+     * payment within the window, in event-time order, each with the payment that ends it.
+     */
+    private TreeMap<Long, Payment> windowEnds(RuleDef r, Payment p) throws Exception {
+        TreeMap<Long, Payment> ends = new TreeMap<>();
+        ends.put(p.eventTime, p);
+        for (Map.Entry<Long, List<Payment>> e : events.entries()) {
+            long s = e.getKey();
+            if (s <= p.eventTime || s >= p.eventTime + r.windowMs) continue;
+            for (Payment q : e.getValue()) if (r.matches(q)) ends.put(s, q); // the last to arrive at s
+        }
+        return ends;
     }
 
     /** Aggregate over this key's payments that match the rule and happened in (t - window, t]. */
@@ -110,9 +135,10 @@ public class DynamicRuleEvaluator extends KeyedBroadcastProcessFunction<String, 
     }
 
     private void alert(RuleDef r, KeyedPayment k, Payment trigger, double observed, Collector<Alert> out) throws Exception {
+        // cooldown in event time, either side: a pattern completed late is the same incident
         Long last = lastAlert.get(r.ruleId);
-        if (last != null && trigger.eventTime >= last && trigger.eventTime - last < r.cooldownMs) return;
-        lastAlert.put(r.ruleId, trigger.eventTime);
+        if (last != null && Math.abs(trigger.eventTime - last) < r.cooldownMs) return;
+        lastAlert.put(r.ruleId, last == null ? trigger.eventTime : Math.max(last, trigger.eventTime));
 
         Alert a = Alert.of("DYNAMIC", k.value, trigger, observed / r.threshold, String.format(
                 "%s: %s%s = %s in %ds by %s", r.name, r.fn, r.aggField == null ? "" : "(" + r.aggField + ")",

@@ -1,0 +1,22 @@
+{
+  "description": "Detection does not depend on arrival order. U2's middle cash-in (C2, 600 s) arrives after the last (C3, 1200 s): the window ending at C3 now holds three, so C3 triggers. C4 (300 s) arrives later still and is inside the same incident, so cooldown on either side suppresses it. U7's earliest cash-in arrives last and completes its pattern the same way.",
+  "rules": [
+    {"rule_id": "three-cash-ins-an-hour", "version": 1, "state": "ACTIVE", "group_by": "receiver_id",
+     "when": [{"field": "txn_type", "op": "==", "value": "CASH_IN"}],
+     "aggregate": {"fn": "COUNT"}, "window_s": 3600,
+     "threshold": {"op": ">=", "value": 3}, "cooldown_s": 3600, "action": "REVIEW"}
+  ],
+  "events": [
+    {"txn_id": "C1", "at": "2026-10-01T10:00:00Z", "txn_type": "CASH_IN", "sender_id": "A1"},
+    {"txn_id": "C3", "at": "2026-10-01T10:20:00Z", "txn_type": "CASH_IN", "sender_id": "A3"},
+    {"txn_id": "C2", "at": "2026-10-01T10:10:00Z", "txn_type": "CASH_IN", "sender_id": "A2"},
+    {"txn_id": "C4", "at": "2026-10-01T10:05:00Z", "txn_type": "CASH_IN", "sender_id": "A4"},
+    {"txn_id": "D2", "at": "2026-10-01T10:30:00Z", "txn_type": "CASH_IN", "sender_id": "A2", "receiver_id": "U7"},
+    {"txn_id": "D3", "at": "2026-10-01T10:50:00Z", "txn_type": "CASH_IN", "sender_id": "A3", "receiver_id": "U7"},
+    {"txn_id": "D1", "at": "2026-10-01T10:00:00Z", "txn_type": "CASH_IN", "sender_id": "A1", "receiver_id": "U7"}
+  ],
+  "expected": [
+    {"rule_id": "three-cash-ins-an-hour", "key": "U2", "trigger_txn_id": "C3", "observed": 3},
+    {"rule_id": "three-cash-ins-an-hour", "key": "U7", "trigger_txn_id": "D3", "observed": 3}
+  ]
+}

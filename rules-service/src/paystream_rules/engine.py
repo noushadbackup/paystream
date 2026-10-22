@@ -5,6 +5,11 @@ events are processed in arrival order; for each event that matches a live rule's
 aggregates the matching events with the same group_by value whose event time is in (t - window, t],
 and alerts if the threshold is crossed and the (key, rule) cooldown has passed in event time.
 
+An event can arrive after later ones for the same key, so it is checked against every window it
+falls in: the one ending at itself and the ones ending at each later matching event in
+(t, t + window), whose trigger is the last event to arrive at that time. Cooldown is the distance in
+event time to the latest alert, on either side.
+
 Flink drops history once the watermark has moved a full window past it; this engine keeps it. The
 results differ only for events that arrive more than a window late, which Flink sends to silver as
 late data anyway.
@@ -81,6 +86,15 @@ class _History:
     def between(self, lo_exclusive: int, hi_inclusive: int) -> list[dict]:
         return self.events[bisect.bisect_right(self.times, lo_exclusive):bisect.bisect_right(self.times, hi_inclusive)]
 
+    def window_ends(self, rule: dict, e: dict) -> list[dict]:
+        """The events ending the windows `e` falls in, in event-time order, one per event time."""
+        t = e["event_time"]
+        ends = {t: e}
+        for x in self.between(t, t + rule["window_s"] * 1000 - 1):
+            if matches(rule, x):
+                ends[x["event_time"]] = x  # the last to arrive at that time
+        return [ends[s] for s in sorted(ends)]
+
 
 class Engine:
     def __init__(self, rules: Iterable[dict]):
@@ -108,10 +122,12 @@ class Engine:
             h.add(e)
             self.max_key_events = max(self.max_key_events, len(h.times))
             for r in self.rules:
-                if r["group_by"] == g and matches(r, e):
-                    observed = self._aggregate(r, h, e["event_time"])
-                    if crosses(r, observed) and self._cooled_down(r, key, e["event_time"]):
-                        yield Alert(r["rule_id"], r["version"], str(value), e["txn_id"], e["event_time"],
+                if r["group_by"] != g or not matches(r, e):
+                    continue
+                for end in h.window_ends(r, e):
+                    observed = self._aggregate(r, h, end["event_time"])
+                    if crosses(r, observed) and self._cooled_down(r, key, end["event_time"]):
+                        yield Alert(r["rule_id"], r["version"], str(value), end["txn_id"], end["event_time"],
                                     observed, r["state"] == "SHADOW", r.get("action", "REVIEW"))
 
     def _aggregate(self, r: dict, h: _History, t: int) -> float:
@@ -129,7 +145,7 @@ class Engine:
     def _cooled_down(self, r: dict, key: tuple[str, str], t: int) -> bool:
         k = (r["rule_id"], *key)
         last = self.last_alert.get(k)
-        if last is not None and t >= last and t - last < r.get("cooldown_s", 600) * 1000:
+        if last is not None and abs(t - last) < r.get("cooldown_s", 600) * 1000:
             return False
-        self.last_alert[k] = t
+        self.last_alert[k] = t if last is None else max(last, t)
         return True
