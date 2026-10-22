@@ -161,7 +161,10 @@ ran on. So far:
   queryable within 12 s (p95), and bronze and silver exact. With the TaskManager killed twice
   mid-stream the job caught up within a minute each time, with no lost or duplicated rows. The first
   hour-long run exposed RocksDB memory growth under glibc malloc, fixed with jemalloc.
-* **Docker Compose stack** (`make bench`): not run yet.
+* **Docker Compose stack** (`make bench`) on a desktop PC (Ryzen 7 7700, Docker Desktop with 12 GB):
+  2,011 payments/s with fraud alerts at p95 198 ms and exact Kafka-to-bronze counts, after tuning
+  RocksDB for the memory the VM leaves Flink; a run that killed the TaskManager twice and the Kafka
+  broker once lost and duplicated nothing.
 
 ## Layout
 

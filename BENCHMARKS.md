@@ -1,9 +1,9 @@
 # Benchmarks
 
-**Status:** three measured benchmarks so far, each below with its result files: the live stack
+**Status:** four measured benchmarks so far, each below with its result files: the live stack
 (Kafka and a Flink cluster, an hour at 2,000 payments/s and a run with the TaskManager killed twice),
-the replay benchmark (the production Flink job over 7.2 million payments from 5 million accounts) and
-the decision API. The Docker Compose run (`make bench`, next section) has not been run yet.
+the replay benchmark (the production Flink job over 7.2 million payments from 5 million accounts),
+the decision API, and the full Docker Compose stack on a desktop PC (`make bench`, next section).
 Every number here comes from a file in `benchmarks/results/` with the machine it ran on, and
 targets that are missed get reported as missed.
 
@@ -38,7 +38,21 @@ detection quality and latency.
 
 | Run | Machine | Rate | Throughput | Alert p95 | Freshness p95 | Recall (min scenario) | Precision | Exactly-once |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| _not run yet_ | | | | | | | | |
+| [tuned, 2,000/s](benchmarks/results/docker-desktop-tuned-2000-20261022T095012Z.json) | Ryzen 7 7700, Docker Desktop (WSL2, 12 GB) | 2,000/s, 20 min, 1M users | **2,011/s**, lag flat at 22k | **198 ms** | 11 s | 100% velocity, mule, PIN, device farm; takeover 0 (no history bootstrap) | 3% (see below) | [Kafka 2,414,338 == bronze](benchmarks/results/docker-desktop-tuned-2000-20261022T095012Z.verify.json) |
+| [chaos, 500/s](benchmarks/results/docker-desktop-chaos-500-20261022T082252Z.json) | same | 500/s, 15 min, TaskManager killed twice, broker once | 478/s, lag p95 22k | 8.6 s | 44 s | same | 95% | [Kafka 452,769 == bronze](benchmarks/results/docker-desktop-chaos-500-20261022T082252Z.verify.json) |
+| [default, 2,000/s](benchmarks/results/docker-desktop-2000-20261022T075826Z.json) | same, before tuning | 2,000/s, 20 min | 655/s, falls behind | backlog | 714 s | n/a | n/a | not drained |
+| [default, 5,000/s](benchmarks/results/docker-desktop-5000-20261022T072337Z.json) | same, before tuning | 5,000/s, 20 min | 569/s, falls behind | backlog | 978 s | n/a | n/a | not drained |
+
+The whole Compose stack (Kafka, Schema Registry, Debezium, Postgres, MinIO, Iceberg REST, Trino,
+Flink, Redis, the services) shares Docker Desktop's 12 GB VM. With the default config the payments
+job got 686 MB of RocksDB memory and stalled ([below](#live-stack-benchmark)); the tuned config
+(RocksDB background threads, dynamic level sizing, heap timers; a 5,120 MB TaskManager with 5 slots
+and the ledger job at parallelism 1, so the payments job gets about 1,640 MB; Trino's heap capped
+at 1 GB) holds 2,000/s with checkpoints around 1 s. Exactly-once is checked after the generator's
+late events (up to 30 minutes) have drained. Precision is low in these runs because 1 million users
+at 2,000/s is 173 payments per user per day, so busy simulated accounts trip the fixed velocity
+threshold; with 5 million users at the same rate (live stack, replay) it is 82 to 83%. A velocity
+threshold relative to each account's own rate would fix it at any ratio.
 
 ## Live stack benchmark
 
@@ -121,8 +135,9 @@ Thread dumps of the starved TaskManager showed the operator threads blocked insi
 and RocksDB's single compaction thread at 66% CPU in disk wait: with about 170 MB per slot shared
 by ten keyed operators, memtables are a few MB, every flush writes a small file, and compaction
 cannot keep up, so RocksDB stalls writes. Options that make reads cheaper do nothing; more compaction
-threads and fewer flushes help (+84% together), but the real requirement is roughly 600 MB of
-RocksDB memory per slot for 5 million accounts at 2,000 events/s on this job.
+threads and fewer flushes help (+84% together), but the real requirement is roughly 400 to 600 MB
+of RocksDB memory per slot at 2,000 events/s on this job. With both (tuning and about 410 MB per
+slot), the Docker Desktop run held 2,000/s (table above).
 
 Setting the cluster up also exposed a packaging bug the local tests could not: the job jar bundled
 the Hadoop client, which Flink loads parent-first, so on a real cluster the Iceberg sink failed with
