@@ -34,6 +34,7 @@ import org.apache.flink.util.Collector;
  * baseline that may already include its neighbours, so it errs towards not alerting.
  */
 public class VelocityRule extends FraudRule {
+    public static final String UID = "rule-velocity";
     private static final long MINUTE = 60_000L;
     // history: decayed count, decayed exposure (ms), history end, excluded interval from, to
     private static final int COUNT = 0, EXPOSURE = 1, END = 2, EXCLUDE_FROM = 3, EXCLUDE_TO = 4;
@@ -49,10 +50,26 @@ public class VelocityRule extends FraudRule {
     public void open(OpenContext ctx) throws Exception {
         super.open(ctx);
         times = getRuntimeContext().getListState(new ListStateDescriptor<>("outgoingTimes", Long.class));
+        history = getRuntimeContext().getState(historyDescriptor(cfg));
+    }
+
+    /** The account's history, shared with {@code DeviceHistoryBootstrap}, which writes it from the lakehouse. */
+    public static ValueStateDescriptor<double[]> historyDescriptor(RuleConfig cfg) {
         ValueStateDescriptor<double[]> desc = new ValueStateDescriptor<>("outgoingHistory", double[].class);
         // after six time constants the history weighs 0.25%: an idle account falls back to the prior
         desc.enableTimeToLive(StateTtlConfig.newBuilder(cfg.velocityHistory.multipliedBy(6)).build());
-        history = getRuntimeContext().getState(desc);
+        return desc;
+    }
+
+    /** An empty history ending at {@code end}, after watching the account for {@code watchedMs}. */
+    public static double[] emptyHistory(long end, long watchedMs, RuleConfig cfg) {
+        double tau = cfg.velocityHistory.toMillis();
+        return new double[] {0, tau * (1 - Math.exp(-watchedMs / tau)), end, 0, Double.NEGATIVE_INFINITY};
+    }
+
+    /** Adds a transfer at {@code t}, no later than the history's end, to a history from {@link #emptyHistory}. */
+    public static void addToHistory(double[] h, long t, RuleConfig cfg) {
+        h[COUNT] += Math.exp(-(h[END] - t) / cfg.velocityHistory.toMillis());
     }
 
     @Override
@@ -60,7 +77,7 @@ public class VelocityRule extends FraudRule {
         long window = cfg.velocityWindow.toMillis();
         long horizon = watermark(ctx) == Long.MIN_VALUE ? Long.MIN_VALUE : watermark(ctx) - window;
         double[] h = history.value();
-        if (h == null) h = new double[] {0, 0, p.eventTime - window, 0, Double.NEGATIVE_INFINITY};
+        if (h == null) h = emptyHistory(p.eventTime - window, 0, cfg);
 
         List<Long> kept = new ArrayList<>();
         int inWindow = 1;
@@ -127,7 +144,7 @@ public class VelocityRule extends FraudRule {
     /** Adds one transfer at {@code t <= h[END]} to the history, unless it was part of a burst. */
     private void absorb(double[] h, long t) {
         if (t >= h[EXCLUDE_FROM] && t <= h[EXCLUDE_TO]) return;
-        h[COUNT] += Math.exp(-(h[END] - t) / cfg.velocityHistory.toMillis());
+        addToHistory(h, t, cfg);
     }
 
     /** Posterior mean count in one window. */

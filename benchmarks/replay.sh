@@ -5,8 +5,8 @@
 # generator installed, and a Redis on REDIS_PORT (0 discards the online store writes).
 #
 # HISTORY_HOURS of earlier traffic are generated too and bootstrapped into a savepoint the replay
-# starts from (DeviceHistoryBootstrap), as a production deployment starts from the lakehouse's
-# history; 0 replays from empty state.
+# starts from (DeviceHistoryBootstrap: known devices, and outgoing rates for the velocity rule), as a
+# production deployment starts from the lakehouse's history; 0 replays from empty state.
 #   RATE=2000 DURATION=1800 ./benchmarks/replay.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -54,7 +54,7 @@ if [[ "$HISTORY_HOURS" -gt 0 ]]; then
   T0=$(date +%s)
   # shellcheck disable=SC2086
   java -Xmx4g $OPENS -cp "$CP" io.paystream.flink.bootstrap.DeviceHistoryBootstrap --jsonl "$DATA/history.jsonl" \
-    --savepoint "file://$PWD/$RUN/savepoint" --maxParallelism 128 > "$RUN/bootstrap.log" 2>&1 \
+    --asOf "${START%+00:00}Z" --savepoint "file://$PWD/$RUN/savepoint" --maxParallelism 128 > "$RUN/bootstrap.log" 2>&1 \
     || { tail -50 "$RUN/bootstrap.log"; exit 1; }
   BOOT_S=$(( $(date +%s) - T0 ))
   EXTRA=(--fromSavepoint "file://$PWD/$RUN/savepoint")

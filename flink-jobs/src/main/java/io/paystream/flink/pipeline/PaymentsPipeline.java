@@ -111,7 +111,7 @@ public final class PaymentsPipeline {
         DataStream<Alert> velocity = success
                 .filter(p -> OUTGOING.contains(p.txnType)).name("outgoing").uid("outgoing")
                 .keyBy(p -> p.senderId)
-                .process(new VelocityRule(rules)).name("rule-velocity").uid("rule-velocity");
+                .process(new VelocityRule(rules)).name("rule-velocity").uid(VelocityRule.UID);
 
         DataStream<Alert> newDevice = success
                 .filter(p -> p.senderId.startsWith("U")).name("user-initiated").uid("user-initiated")
