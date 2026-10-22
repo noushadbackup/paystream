@@ -7,6 +7,8 @@ against the ledger to the paisa.
 
 Everything runs on a laptop with Docker Compose.
 
+**Showcase page with the measured results: https://noushadbackup.github.io/paystream/** (source in [`site/`](site/index.html))
+
 ![Fraud Ops Console](docs/img/ops-console.png)
 <sub>The Fraud Ops Console in demo mode (`make demo`, no Docker needed). On the live stack it reads the lakehouse through Trino and refreshes every 5 s.</sub>
 
@@ -186,4 +188,5 @@ monitoring/    Prometheus scrape config, Grafana dashboard
 benchmarks/    full-stack run (run_benchmark.sh, measure.py), live stack (stack/run.sh), replay (replay.sh), results/
 deploy/        Terraform (AWS), Strimzi and Flink operator manifests, Helm chart
 docs/          design doc and ADRs
+site/          showcase page, published to GitHub Pages by .github/workflows/pages.yml
 ```

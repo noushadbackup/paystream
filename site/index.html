@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PayStream</title>
+<meta name="description" content="A real-time payments data platform (Kafka, Flink, Iceberg, dbt, Kubernetes) with fraud detection, measured on a real cluster and a desktop PC.">
+<meta property="og:title" content="PayStream: real-time payments data platform">
+<meta property="og:description" content="Kafka, Flink, Iceberg, dbt. Fraud alerts in 0.2 s, exactly-once lakehouse, every number from a committed run file.">
+<meta property="og:image" content="img/ops-console.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: an engineering run report. Thesis and four measured figures, the pipeline as a strip,
+   then the benchmark runs in the order they happened, each with its before and after. */
+:root {
+  --paper: #f3f6f3;
+  --surface: #ffffff;
+  --ink: #142019;
+  --ink-2: #44554b;
+  --ink-3: #6e7d74;
+  --rule: #d6dfd9;
+  --track: #e4ece7;
+  --accent: #0b7a5c;
+  --accent-wash: #e1f1ea;
+  --signal: #a8410f;
+  --signal-wash: #f8e9e0;
+  --good: #1d6f3a;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --s-xs: 0.75rem; --s-sm: 0.875rem; --s-md: 1rem; --s-lg: 1.25rem; --s-xl: 1.75rem; --s-2xl: 2.5rem; --s-3xl: clamp(2.5rem, 7vw, 4.5rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1613; --surface: #151f1a; --ink: #e5ece7; --ink-2: #aebcb3; --ink-3: #82918a;
+    --rule: #26332c; --track: #22302a; --accent: #4fc29b; --accent-wash: #173329;
+    --signal: #f0905f; --signal-wash: #3a2219; --good: #6fcf8f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1613; --surface: #151f1a; --ink: #e5ece7; --ink-2: #aebcb3; --ink-3: #82918a;
+  --rule: #26332c; --track: #22302a; --accent: #4fc29b; --accent-wash: #173329;
+  --signal: #f0905f; --signal-wash: #3a2219; --good: #6fcf8f; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--f-body); font-size: var(--s-md);
+  line-height: 1.6; -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1080px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+section { padding-block: 3.5rem; border-top: 1px solid var(--rule); }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.1; }
+h2 { font-size: var(--s-2xl); font-weight: 700; letter-spacing: -0.01em; }
+h3 { font-size: var(--s-lg); font-weight: 700; }
+p { margin: 0; }
+.lede { max-width: 62ch; color: var(--ink-2); font-size: var(--s-lg); line-height: 1.5; }
+.eyebrow { font-family: var(--f-mono); font-size: var(--s-xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.mono { font-family: var(--f-mono); }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* hero */
+header { padding-block: 4rem 3rem; display: grid; gap: 1.5rem; }
+header h1 { font-size: var(--s-3xl); font-weight: 700; letter-spacing: -0.03em; }
+header h1 span { color: var(--accent); }
+.figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; margin-top: 1rem; }
+.fig { background: var(--surface); padding: 1.25rem; display: grid; gap: 0.25rem; align-content: start; min-width: 0; }
+.fig b { font-family: var(--f-body); font-weight: 600; font-size: var(--s-2xl); line-height: 1.1; letter-spacing: -0.01em; }
+.fig span { color: var(--ink-2); font-size: var(--s-sm); }
+.source { font-size: var(--s-xs); color: var(--ink-3); font-family: var(--f-mono); }
+
+/* pipeline strip */
+.strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem; margin-top: 2rem; }
+.stage { position: relative; padding: 1rem; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; display: grid; gap: 0.4rem; align-content: start; min-width: 0; }
+.stage h3 { font-size: var(--s-md); }
+.stage p { color: var(--ink-2); font-size: var(--s-sm); line-height: 1.5; }
+.stage .eyebrow { color: var(--accent); }
+.stage:not(:last-child)::after {
+  content: ""; position: absolute; right: -0.5rem; top: 1.4rem; width: 0.5rem; height: 1px; background: var(--ink-3);
+}
+
+/* runs */
+.runs { display: grid; gap: 0; margin-top: 2rem; }
+.run { display: grid; grid-template-columns: 11rem minmax(0, 1fr) minmax(0, 15rem); gap: 1.5rem; padding-block: 1.75rem; border-top: 1px solid var(--rule); }
+.run:first-child { border-top: 0; }
+.run .when { display: grid; gap: 0.35rem; align-content: start; }
+.run .when .mono { font-size: var(--s-xs); color: var(--ink-3); word-break: break-all; }
+.run .body { display: grid; gap: 0.6rem; min-width: 0; }
+.run .body p { color: var(--ink-2); max-width: 62ch; }
+.delta { display: grid; gap: 0.5rem; align-content: start; }
+.delta div { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.55rem 0.75rem; border-radius: 4px; font-size: var(--s-sm); }
+.delta .before { background: var(--signal-wash); }
+.delta .after { background: var(--accent-wash); }
+.delta b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta .tag { font-family: var(--f-mono); font-size: var(--s-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); }
+.pill { justify-self: start; display: inline-block; font-family: var(--f-mono); font-size: var(--s-xs); padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--rule); color: var(--ink-2); }
+
+/* recall chart + ledger */
+.two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 2.5rem; margin-top: 2rem; }
+.chart { position: relative; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 1.25rem 1.25rem 1rem; min-width: 0; }
+.chart h3 { font-size: var(--s-md); }
+.chart .sub { color: var(--ink-3); font-size: var(--s-sm); margin-top: 0.2rem; }
+.bars { display: grid; gap: 0.35rem; margin-top: 1.25rem; }
+.bar { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr) 3.5rem; align-items: center; gap: 0.75rem; padding-block: 0.3rem; border-radius: 4px; cursor: default; }
+.bar:hover, .bar:focus-visible { background: var(--paper); outline: none; }
+.bar .lab { font-size: var(--s-sm); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar .track { position: relative; height: 14px; background-image: linear-gradient(to right, var(--rule) 1px, transparent 1px); background-size: 25% 100%; border-left: 1px solid var(--ink-3); }
+.bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 0 4px 4px 0; }
+.bar .val { font-size: var(--s-sm); font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right; }
+.axis { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr) 3.5rem; gap: 0.75rem; margin-top: 0.4rem; }
+.axis .ticks { display: flex; justify-content: space-between; font-size: var(--s-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--paper); font-size: var(--s-xs); line-height: 1.45; padding: 0.5rem 0.65rem; border-radius: 4px; max-width: 16rem; z-index: 2; }
+.ledger { display: grid; gap: 0; align-content: start; }
+.ledger .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; padding-block: 0.8rem; border-bottom: 1px solid var(--rule); align-items: baseline; }
+.ledger .row span { color: var(--ink-2); font-size: var(--s-sm); }
+.ledger .row b { font-family: var(--f-mono); font-weight: 500; font-size: var(--s-sm); font-variant-numeric: tabular-nums; }
+.ok { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--good); font-family: var(--f-mono); font-size: var(--s-xs); text-transform: uppercase; letter-spacing: 0.06em; }
+.ok::before { content: ""; width: 0.55rem; height: 0.3rem; border-left: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg) translateY(-2px); }
+
+/* platform grid */
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2rem 2.5rem; margin-top: 2rem; }
+.cap { display: grid; gap: 0.4rem; align-content: start; min-width: 0; }
+.cap p { color: var(--ink-2); font-size: var(--s-sm); }
+.cap .mono { font-size: var(--s-xs); color: var(--ink-3); }
+
+.limits { display: grid; gap: 0.75rem; margin-top: 1.5rem; max-width: 70ch; padding: 0; list-style: none; }
+.limits li { padding-left: 1.25rem; position: relative; color: var(--ink-2); }
+.limits li::before { content: ""; position: absolute; left: 0; top: 0.7em; width: 0.5rem; height: 1px; background: var(--ink-3); }
+.shots { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.75rem; margin-top: 2rem; }
+.shots figure { margin: 0; display: grid; gap: 0.5rem; min-width: 0; }
+.shots img { width: 100%; height: auto; display: block; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+.shots figcaption { color: var(--ink-3); font-size: var(--s-sm); }
+footer { border-top: 1px solid var(--rule); padding-block: 2rem 3rem; display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; color: var(--ink-3); font-size: var(--s-sm); }
+
+@media (max-width: 860px) {
+  .figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strip { grid-template-columns: minmax(0, 1fr); }
+  .stage:not(:last-child)::after { right: auto; left: 1.4rem; top: auto; bottom: -0.5rem; width: 1px; height: 0.5rem; }
+  .run { grid-template-columns: minmax(0, 1fr); gap: 0.9rem; }
+  .two, .grid, .shots { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 460px) {
+  .figures { grid-template-columns: minmax(0, 1fr); }
+  .bar, .axis { grid-template-columns: 7rem minmax(0, 1fr) 3rem; gap: 0.5rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fill { transition: width 600ms ease-out; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Real-time payments data platform · Kafka · Flink · Iceberg · dbt · Kubernetes</p>
+    <h1>PayStream<span>.</span></h1>
+    <p class="lede">A mobile-money platform's data backbone: P2P transfers, agent cash-in and cash-out,
+      merchant payments. It stops fraud before the money moves, keeps an exactly-once lakehouse, and
+      reconciles the stream against the ledger to the paisa. The numbers below come from replaying
+      7.2 million payments from 5 million accounts through the production Flink job, from running
+      it for an hour on a real Kafka broker and Flink cluster, and from the whole Docker Compose stack
+      on a desktop PC.</p>
+    <div class="figures" role="list">
+      <div class="fig" role="listitem"><b class="num" id="f-events">7,239,318</b><span>payment events replayed, 5M accounts, 20k agents</span></div>
+      <div class="fig" role="listitem"><b class="num" id="f-thr">4,334/s</b><span>sustained on 4 vCPU, RocksDB state, exactly-once checkpoints</span></div>
+      <div class="fig" role="listitem"><b class="num" id="f-prec">83%</b><span>of alerts land on accounts with real fraud, up from 2%</span></div>
+      <div class="fig" role="listitem"><b class="num">0</b><span>rows lost or double-counted between Kafka input, bronze and silver</span></div>
+    </div>
+    <p class="source" id="f-source">Source: benchmarks/results/replay-20261022T003309Z.json · 4 vCPU, 15.7 GB cloud container</p>
+  </header>
+
+  <section aria-labelledby="h-arch">
+    <p class="eyebrow">How a payment moves</p>
+    <h2 id="h-arch">From the tap to the ledger in five steps</h2>
+    <div class="strip">
+      <div class="stage"><p class="eyebrow">Ingest</p><h3>Kafka + Avro</h3><p>Payment events and ledger changes (Debezium CDC) under schema contracts with backward compatibility.</p></div>
+      <div class="stage"><p class="eyebrow">Stream</p><h3>Flink, exactly-once</h3><p>Dedup of app retries, event-time windows, four built-in detectors and analyst rules loaded without a deploy.</p></div>
+      <div class="stage"><p class="eyebrow">Decide</p><h3>Decision API</h3><p>The gateway asks before authorising. One Redis read of Flink's features, limits, flags and a LightGBM score.</p></div>
+      <div class="stage"><p class="eyebrow">Act</p><h3>Cases</h3><p>Alerts become cases with SLAs. A verdict freezes the account or clears it, and becomes a training label.</p></div>
+      <div class="stage"><p class="eyebrow">Store</p><h3>Iceberg + dbt</h3><p>Bronze, silver and gold; AML reports on the Dhaka business day; stream reconciled to the ledger.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-live">
+    <p class="eyebrow">On a real cluster</p>
+    <h2 id="h-live">An hour of live traffic, then two crashes</h2>
+    <p class="lede" style="margin-top:1rem">A Kafka broker and a Flink cluster on the same 4-vCPU box, the generator producing
+      2,000 payments a second in real time from 5 million accounts. Latency is measured on every alert,
+      from the moment the payment landed in Kafka.</p>
+    <div class="figures" role="list">
+      <div class="fig" role="listitem"><b class="num">226 ms</b><span>p95 fraud alert latency over 60 minutes (p99 477 ms)</span></div>
+      <div class="fig" role="listitem"><b class="num">0</b><span>records of consumer lag at every sample, for the whole hour</span></div>
+      <div class="fig" role="listitem"><b class="num">11.8 s</b><span>p95 until a payment is queryable in silver, just above the 10 s checkpoint</span></div>
+      <div class="fig" role="listitem"><b class="num">&lt; 1 min</b><span>to recover from each <span class="mono">kill -9</span> of the TaskManager, no row lost or duplicated</span></div>
+    </div>
+    <div class="runs" style="margin-top:2rem">
+      <article class="run">
+        <div class="when"><span class="pill">Live run 1 → 2</span><span class="mono">stack-20261022T015446Z<br>stack-20261022T034821Z</span></div>
+        <div class="body"><h3>The allocator decided the last ten minutes</h3>
+          <p>The first hour held p95 under 300 ms for 48 minutes, then checkpoints went from 1 s to 25 s
+            and the job fell behind. The TaskManager had grown to 8.1 GB against a 6.5 GB budget: glibc
+            malloc fragments RocksDB's native memory. With jemalloc, the same hour stayed at about
+            4.5 GB, with checkpoints under 1.8 s throughout.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Minutes 50–60, p95</span><b>37.5 s</b></div><div class="after"><span class="tag">jemalloc</span><b>217 ms</b></div></div>
+      </article>
+      <article class="run">
+        <div class="when"><span class="pill">Chaos</span><span class="mono">stack-20261022T050237Z</span></div>
+        <div class="body"><h3>Killed twice, still exact</h3>
+          <p>The TaskManager was killed with <span class="mono">kill -9</span> at 6:40 and 13:20 of a 20-minute run.
+            Each time the job restored its last checkpoint and cleared the backlog within 48 and 57 seconds.
+            Afterwards bronze still matched the topic record for record and silver the distinct payments.</p></div>
+        <div class="delta"><div class="after"><span class="tag">Kafka records</span><b>2,412,034</b></div><div class="after"><span class="tag">Bronze rows</span><b>2,412,034</b></div></div>
+      </article>
+    </div>
+    <p class="source">Source: benchmarks/results/stack-20261022T034821Z.json and stack-20261022T050237Z.json · Kafka 3.8, Flink 1.20, RocksDB, exactly-once Iceberg sinks</p>
+  </section>
+
+  <section aria-labelledby="h-desktop">
+    <p class="eyebrow">On a desktop PC</p>
+    <h2 id="h-desktop">The whole stack in 12 GB, with servers killed mid-stream</h2>
+    <p class="lede" style="margin-top:1rem">All of it under Docker Desktop on one Ryzen 7 7700 with a 12 GB WSL2 VM: Kafka,
+      Schema Registry, Debezium, Postgres, MinIO, the Iceberg REST catalog, Trino, Flink, Redis and the
+      services. 20 minutes at 2,000 payments a second from 1 million accounts.</p>
+    <div class="figures" role="list">
+      <div class="fig" role="listitem"><b class="num">2,011/s</b><span>sustained for 20 minutes, consumer lag flat</span></div>
+      <div class="fig" role="listitem"><b class="num">198 ms</b><span>p95 fraud alert latency, from Kafka to alert</span></div>
+      <div class="fig" role="listitem"><b class="num">11 s</b><span>p95 until a payment is queryable in silver</span></div>
+      <div class="fig" role="listitem"><b class="num">452,769</b><span>Kafka records and bronze rows, equal after two TaskManager kills and a broker kill</span></div>
+    </div>
+    <div class="runs" style="margin-top:2rem">
+      <article class="run">
+        <div class="when"><span class="pill">Default → tuned</span><span class="mono">docker-desktop-2000-20261022T075826Z<br>docker-desktop-tuned-2000-20261022T095012Z</span></div>
+        <div class="body"><h3>RocksDB was starving, not the CPU</h3>
+          <p>With the default config the payments job got 686 MB of RocksDB memory shared by ten keyed
+            operators. Memtables stayed tiny, a single compaction thread fell behind and writes stalled.
+            Four background threads, dynamic level sizing, heap timers and a memory budget that gives the
+            payments job about 1,640 MB took it from falling behind to holding the rate.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Default</span><b>655 ev/s</b></div><div class="after"><span class="tag">Tuned</span><b>2,011 ev/s</b></div></div>
+      </article>
+    </div>
+    <div class="shots">
+      <figure><img src="img/grafana-before-tuning.png" alt="Grafana during the untuned desktop run: consumer lag climbing past 1.5 million records and checkpoint duration growing to 2.5 minutes" loading="lazy"><figcaption>Before tuning: lag climbs past 1.5 million records and checkpoints stretch to 2.5 minutes. The tuned run held lag flat with checkpoints around 1 s.</figcaption></figure>
+      <figure><img src="img/ops-console.png" alt="Fraud Ops Console: payments, money moved, failure rate, fraud alerts, alerts per minute by rule and the live alert feed" loading="lazy"><figcaption>The Fraud Ops Console analysts work from (demo data, <span class="mono">make demo</span>).</figcaption></figure>
+    </div>
+    <p class="source">Source: benchmarks/results/docker-desktop-*.json · Docker Desktop, WSL2 12 GB, 16 threads</p>
+  </section>
+
+  <section aria-labelledby="h-runs">
+    <p class="eyebrow">What the benchmark caught</p>
+    <h2 id="h-runs">Every run found something the unit tests could not</h2>
+    <p class="lede" style="margin-top:1rem">Each run replays generated traffic with labelled fraud through the real job graph, then scores
+      every alert against the labels. These are the runs in the order they happened, and what each one changed.</p>
+    <div class="runs">
+      <article class="run">
+        <div class="when"><span class="pill">Run 1 → 2</span><span class="mono">replay-20261021T212317Z<br>replay-20261021T214300Z</span></div>
+        <div class="body"><h3>State layout decided throughput</h3>
+          <p>On RocksDB every state access is a serialised lookup. The online-features operator kept four
+            separate states per account and dominated the job. Collapsing them into one value per account,
+            with the same output contract, raised throughput by 61% on the same data.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Before</span><b>3,560 ev/s</b></div><div class="after"><span class="tag">After</span><b>5,743 ev/s</b></div></div>
+      </article>
+      <article class="run">
+        <div class="when"><span class="pill">Run 1 → 5</span><span class="mono">generator/population.py</span></div>
+        <div class="body"><h3>The simulator was the bug</h3>
+          <p>Precision was 2%: 5,483 velocity alerts, mostly from one simulated customer who made 9,842
+            payments in 53 minutes. An uncapped Pareto draw over millions of users does that; no real wallet
+            does. User activity is now capped at 20 times the mean, with a test that no account dominates.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Velocity alerts</span><b>5,483</b></div><div class="after"><span class="tag">Final run</span><b id="d-vel">160</b></div></div>
+      </article>
+      <article class="run">
+        <div class="when"><span class="pill">Run 2 → 3</span><span class="mono">replay-20261021T224458Z</span></div>
+        <div class="body"><h3>A fresh deployment is blind to takeovers</h3>
+          <p>The new-device rule needs 90 days of which phone each account uses. From empty state it caught
+            no account takeovers at all. Of the 11 still missed, 9 had no payment in the two hours of history the benchmark used. A State Processor API job now builds that history from the lakehouse
+            into a savepoint the payments job starts from.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Cold start</span><b>0 of 57</b></div><div class="after"><span class="tag">Bootstrapped</span><b id="d-ato">48 of 59</b></div></div>
+      </article>
+      <article class="run">
+        <div class="when"><span class="pill">Run 3 → 4</span><span class="mono">replay-20261021T232835Z</span></div>
+        <div class="body"><h3>Four sigma is not rare at 20,000 agents</h3>
+          <p>The agent cash-out spike rule used mean plus four standard deviations. Tested on every agent on
+            every cash-out, that raised about 160 false alerts an hour. It now uses the exact Poisson tail
+            at one in a million against each agent's own hourly rate.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Precision</span><b>53%</b></div><div class="after"><span class="tag">After</span><b>83%</b></div></div>
+      </article>
+      <article class="run">
+        <div class="when"><span class="pill">Run 4 → 5</span><span class="mono" id="d-run5">replay-20261022T003309Z</span></div>
+        <div class="body"><h3>Out-of-order events hid structuring</h3>
+          <p>Three agents' cash-ins into one wallet come through different Kafka partitions with different lag.
+            When the middle one arrived last, the analyst rule never re-checked the window that now held all
+            three. Each arrival is now checked against every window it falls in, in Flink and in the Python
+            backtester, pinned by a shared conformance test.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Parallel run</span><b>missed</b></div><div class="after"><span class="tag">After</span><b id="d-struct">1 of 1</b></div></div>
+      </article>
+      <article class="run">
+        <div class="when"><span class="pill">Run 6 → 8</span><span class="mono">replay-20261022T113349Z<br>replay-20261022T121304Z</span></div>
+        <div class="body"><h3>One threshold does not fit every account</h3>
+          <p>On the desktop run's traffic, 1 million accounts at 2,000 payments a second, the busiest
+            legitimate accounts send two or three transfers a minute, so a fixed bar of six a minute raised
+            2,696 false velocity alerts. The rule now compares each account with its own rate, a
+            Gamma-Poisson baseline that alerts below a one-in-100,000 tail, and learns those rates from the
+            lakehouse into the savepoint before it starts. Every velocity burst and takeover is still caught.</p></div>
+        <div class="delta"><div class="before"><span class="tag">Precision</span><b>3.3%</b></div><div class="after"><span class="tag">After</span><b>72.5%</b></div></div>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-quality">
+    <p class="eyebrow">Final run</p>
+    <h2 id="h-quality">Detection and correctness</h2>
+    <div class="two">
+      <figure class="chart" id="chart" style="margin:0">
+        <h3>Incidents detected, by fraud scenario</h3>
+        <p class="sub">Incidents complete enough to detect after a 30-minute warm-up: 170 of 181 caught. Hover a bar for what the scenario is.</p>
+        <div class="bars" id="bars"></div>
+        <div class="axis" aria-hidden="true"><span></span><div class="ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div><span></span></div>
+        <div class="tip" id="tip" hidden></div>
+      </figure>
+      <div class="ledger" aria-label="Correctness checks">
+        <div class="row"><span>Events in the input file</span><b id="l-in">7,239,318</b></div>
+        <div class="row"><span>Rows in bronze (every record as received)</span><b id="l-bronze">7,239,318</b></div>
+        <div class="row"><span>Distinct transactions in the input</span><b id="l-distinct">7,203,302</b></div>
+        <div class="row"><span>Rows in silver (deduplicated)</span><b id="l-silver">7,203,302</b></div>
+        <div class="row"><span>Duplicate retries removed</span><b id="l-dup">36,016</b></div>
+        <div class="row"><span>Late events kept for the batch layer</span><b id="l-late">50,896</b></div>
+        <div class="row"><span>Bronze equals input, silver equals distinct input</span><span class="ok">passed</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-platform">
+    <p class="eyebrow">Also in the platform</p>
+    <h2 id="h-platform">Built the way a regulated payments company runs</h2>
+    <div class="grid">
+      <div class="cap"><h3>Decisions in milliseconds</h3><p>1,000 decisions/s with p50 1.8 ms and p99 48 ms client-side, no errors. Degraded mode keeps limits on when Redis is slow.</p><span class="mono">BENCHMARKS.md · decision API</span></div>
+      <div class="cap"><h3>Rules without deploys</h3><p>Analysts write rules as JSON. Four-eyes approval, backtest on lakehouse history, kill switch and a hash-chained audit log.</p><span class="mono">ADR 7 · rules-service</span></div>
+      <div class="cap"><h3>A model in the payment path</h3><p>Trained on the decision log, so features match what was served. Champion and challenger, paired-bootstrap promotion, daily drift check.</p><span class="mono">ADR 10 · ml</span></div>
+      <div class="cap"><h3>AML reporting</h3><p>Cash transaction reports and an STR worklist per customer and Dhaka business day, with structuring, pass-through and fan-in typologies.</p><span class="mono">ADR 11 · dbt/models/aml</span></div>
+      <div class="cap"><h3>Production on Kubernetes</h3><p>Strimzi Kafka with an ACL per service, Flink operator with savepoint upgrades and HA, Helm chart, Terraform for EKS, RDS, ElastiCache and S3 under KMS.</p><span class="mono">ADR 12 · deploy/</span></div>
+      <div class="cap"><h3>Warm start from the lakehouse</h3><p>Ninety days of device history and each account's usual payment rate written into a savepoint before the first deployment, so detection works on day one.</p><span class="mono">ADR 13 · DeviceHistoryBootstrap</span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-limits">
+    <p class="eyebrow">What these numbers are not</p>
+    <h2 id="h-limits">Limits of the measurements</h2>
+    <ul class="limits">
+      <li>Everything ran on one 4-vCPU container: the replay reads a file to find the Flink job's ceiling, and the live runs share the box between Kafka, Flink, Redis and the generator, so 2,000 payments/s is a rate it sustains with headroom, not a cluster's limit. One broker: the desktop chaos run killed it and the job recovered exactly, but with a single broker that is a restart, not a failover between replicas.</li>
+      <li>Traffic and fraud are simulated, with labels from the simulator. Precision is account-level: an alert counts when its account has labelled fraud. The 72.5% on 1 million accounts is a replay; the desktop stack run itself does not load the rate history yet.</li>
+      <li>Two hours of bootstrapped history stand in for the 90 days production would read, so takeover recall here is a floor.</li>
+      <li>The Kubernetes and Terraform setup is validated in CI (schemas, lint, terraform validate) and has not yet been applied to a real AWS account.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <span>Source, tests, ADRs and every result file: <a href="https://github.com/noushadbackup/paystream">github.com/noushadbackup/paystream</a></span>
+    <span class="mono">Numbers only from committed run files</span>
+  </footer>
+</div>
+
+<script>
+const RECALL = [
+  { name: "Velocity burst", d: 65, n: 65, about: "Many payments from one account in minutes." },
+  { name: "Account takeover", d: 48, n: 59, about: "Cash-out from a phone the account has never used." },
+  { name: "Mule ring", d: 10, n: 10, about: "Many distinct senders paying one account." },
+  { name: "Agent float spike", d: 9, n: 9, about: "An agent's cash-outs far above its own hourly rate." },
+  { name: "PIN brute force", d: 20, n: 20, about: "A burst of failed PIN attempts (analyst rule)." },
+  { name: "Device farm", d: 17, n: 17, about: "One phone used by many accounts (analyst rule)." },
+  { name: "Structuring", d: 1, n: 1, about: "Several cash-ins just under the limit at different agents (analyst rule)." },
+];
+const bars = document.getElementById("bars");
+const tip = document.getElementById("tip");
+const chart = document.getElementById("chart");
+for (const r of RECALL) {
+  const pct = r.n ? (100 * r.d) / r.n : 0;
+  const row = document.createElement("div");
+  row.className = "bar";
+  row.tabIndex = 0;
+  row.setAttribute("aria-label", `${r.name}: ${r.d} of ${r.n} incidents detected`);
+  row.innerHTML = `<span class="lab">${r.name}</span><span class="track"><span class="fill" style="width:${pct}%"></span></span><span class="val">${r.d}/${r.n}</span>`;
+  const show = (x, y) => {
+    tip.innerHTML = `<strong>${r.name}</strong><br>${r.about}<br>${r.d} of ${r.n} detected (${Math.round(pct)}%)`;
+    tip.hidden = false;
+    const c = chart.getBoundingClientRect();
+    const left = Math.min(Math.max(8, x - c.left + 12), c.width - tip.offsetWidth - 8);
+    tip.style.left = left + "px";
+    tip.style.top = (y - c.top + 14) + "px";
+  };
+  row.addEventListener("mousemove", e => show(e.clientX, e.clientY));
+  row.addEventListener("mouseleave", () => { tip.hidden = true; });
+  row.addEventListener("focus", () => { const b = row.getBoundingClientRect(); show(b.left + b.width / 2, b.top + b.height / 2); });
+  row.addEventListener("blur", () => { tip.hidden = true; });
+  bars.appendChild(row);
+}
+</script>
+</body>
+</html>
