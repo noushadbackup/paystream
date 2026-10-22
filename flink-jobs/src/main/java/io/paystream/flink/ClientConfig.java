@@ -43,10 +43,16 @@ public final class ClientConfig {
 
     /**
      * Iceberg REST catalog on S3. MinIO in compose needs an endpoint and path-style access; on AWS
-     * both are left out and credentials come from the pod's IAM role.
+     * both are left out and credentials come from the pod's IAM role. {@code --catalogType hadoop}
+     * keeps the tables in a directory instead (the native-stack benchmark, which has no S3).
      */
     public static Map<String, String> lakehouse(ParameterTool p) {
         Map<String, String> m = new LinkedHashMap<>();
+        if ("hadoop".equals(p.get("catalogType", "rest"))) {
+            m.put("catalog-type", "hadoop");
+            m.put("warehouse", p.getRequired("warehouse"));
+            return m;
+        }
         m.put("catalog-type", "rest");
         m.put("uri", p.get("catalogUri", "http://iceberg-rest:8181"));
         m.put("warehouse", p.get("warehouse", "s3://warehouse/"));

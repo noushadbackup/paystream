@@ -9,6 +9,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import time
 from datetime import datetime
@@ -58,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.ledger_dsn:
         sinks.append(LedgerSink(a.ledger_dsn))
 
+    def stop(*_):  # a container stop or a benchmark ending early: flush what was produced, then exit
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, stop)
     wall0, sent, fraud, last_report = time.time(), 0, 0, time.time()
     try:
         for e in sim.run(start_ms, a.duration):

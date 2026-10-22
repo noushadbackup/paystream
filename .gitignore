@@ -14,3 +14,4 @@ benchmarks/runs/
 dbt/ci/*.duckdb*
 dbt/.user.yml
 benchmarks/replay-work/
+benchmarks/stack-work/

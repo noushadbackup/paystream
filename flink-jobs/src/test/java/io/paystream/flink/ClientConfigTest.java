@@ -31,4 +31,11 @@ class ClientConfigTest {
         assertThat(aws).doesNotContainKeys("s3.endpoint", "s3.path-style-access")
                 .containsEntry("client.region", "ap-south-1").containsEntry("warehouse", "s3://paystream-lake/");
     }
+
+    @Test
+    void hadoopCatalogNeedsOnlyAWarehouse() {
+        assertThat(ClientConfig.lakehouse(ParameterTool.fromArgs(new String[] {
+            "--catalogType", "hadoop", "--warehouse", "file:///data/warehouse"})))
+                .containsExactlyEntriesOf(Map.of("catalog-type", "hadoop", "warehouse", "file:///data/warehouse"));
+    }
 }

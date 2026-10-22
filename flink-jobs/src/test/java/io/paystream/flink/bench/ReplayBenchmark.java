@@ -10,13 +10,11 @@ import io.paystream.flink.pipeline.PaymentsPipeline;
 import io.paystream.flink.rules.RuleConfig;
 import io.paystream.flink.rules.dynamic.RuleUpdates;
 import io.paystream.flink.sink.IcebergTables;
-import java.io.BufferedWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -39,12 +37,8 @@ import org.apache.flink.core.execution.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
-import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamStatementSet;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.types.Row;
-import org.apache.flink.util.CloseableIterator;
 
 /**
  * Replays a generator file through the production job graph as fast as it will go and reports what
@@ -140,39 +134,8 @@ public final class ReplayBenchmark {
         report.put("processors", Runtime.getRuntime().availableProcessors());
         report.put("max_heap_mb", Runtime.getRuntime().maxMemory() >> 20);
 
-        TableEnvironment batch = TableEnvironment.create(EnvironmentSettings.inBatchMode());
-        batch.getConfig().setLocalTimeZone(ZoneOffset.UTC);
-        batch.executeSql("CREATE CATALOG lake WITH ('type'='iceberg', 'catalog-type'='hadoop', 'warehouse'='"
-                + warehouse + "')");
-        Map<String, String> counts = new LinkedHashMap<>();
-        counts.put("bronze_rows", "SELECT count(*) FROM lake.bronze.payment_events");
-        counts.put("silver_rows", "SELECT count(*) FROM lake.silver.payments");
-        counts.put("silver_distinct_txn", "SELECT count(DISTINCT txn_id) FROM lake.silver.payments");
-        counts.put("late_rows", "SELECT count(*) FROM lake.silver.late_payments");
-        counts.put("alert_rows", "SELECT count(*) FROM lake.silver.fraud_alerts");
-        counts.put("kpi_txn_sum", "SELECT sum(txn_count) FROM lake.gold.kpi_minute");
-        ObjectNode c = report.putObject("counts");
-        for (var e : counts.entrySet()) {
-            try (CloseableIterator<Row> it = batch.executeSql(e.getValue()).collect()) {
-                c.put(e.getKey(), ((Number) it.next().getField(0)).longValue());
-            }
-        }
-
-        try (BufferedWriter w = Files.newBufferedWriter(work.resolve("alerts.jsonl"));
-             CloseableIterator<Row> it = batch.executeSql("SELECT alert_id, rule, rule_id, account_id, shadow"
-                     + " FROM lake.silver.fraud_alerts").collect()) {
-            while (it.hasNext()) {
-                Row r = it.next();
-                ObjectNode a = json.createObjectNode();
-                a.put("alert_id", (String) r.getField(0));
-                a.put("rule", (String) r.getField(1));
-                a.put("rule_id", (String) r.getField(2));
-                a.put("account_id", (String) r.getField(3));
-                a.put("shadow", Boolean.TRUE.equals(r.getField(4)));
-                w.write(json.writeValueAsString(a));
-                w.newLine();
-            }
-        }
+        report.set("counts", LakeReport.counts(warehouse, json));
+        LakeReport.exportAlerts(warehouse, work.resolve("alerts.jsonl"), json, false);
         json.writerWithDefaultPrettyPrinter().writeValue(work.resolve("flink.json").toFile(), report);
         System.out.println(json.writerWithDefaultPrettyPrinter().writeValueAsString(report));
     }
