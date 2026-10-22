@@ -60,13 +60,22 @@ checked against its schema with kubeconform, and `terraform fmt` and `validate`.
    `rds.logical_replication=1` (or `wal_level=logical`), a replication role and a publication for
    the ledger tables; put its credentials in the `ledger-db` secret, then
    `kubectl apply -f deploy/k8s/kafka/connect.yaml`.
-7. **Flink jobs.** Fill the placeholders from Terraform outputs and apply:
+7. **Flink jobs.** On a first deployment, `device-history-bootstrap.yaml` runs first: it writes 90
+   days of account device history from the lakehouse into the savepoint the payments job starts
+   from (`initialSavepointPath`), so takeover detection is warm on day one
+   ([ADR 13](../docs/adr/0013-warm-start-from-the-lakehouse.md)). Fill the placeholders from
+   Terraform outputs and apply, the bootstrap first, waiting for it to finish:
    ```bash
    export REGISTRY=... VERSION=... CHECKPOINT_BUCKET=... LAKE_BUCKET=... AWS_REGION=ap-south-1 REDIS_ENDPOINT=...
-   for f in deploy/k8s/flink/*.yaml; do
+   render() {
      sed -e "s|REGISTRY|$REGISTRY|g; s|VERSION|$VERSION|g; s|CHECKPOINT_BUCKET|$CHECKPOINT_BUCKET|g" \
-         -e "s|LAKE_BUCKET|$LAKE_BUCKET|g; s|AWS_REGION|$AWS_REGION|g; s|REDIS_ENDPOINT|$REDIS_ENDPOINT|g" "$f" | kubectl apply -f -
-   done
+         -e "s|LAKE_BUCKET|$LAKE_BUCKET|g; s|AWS_REGION|$AWS_REGION|g; s|REDIS_ENDPOINT|$REDIS_ENDPOINT|g" "$1"
+   }
+   render deploy/k8s/flink/device-history-bootstrap.yaml | kubectl apply -f -
+   kubectl -n paystream wait flinkdeployment/device-history-bootstrap \
+     --for=jsonpath='{.status.jobStatus.state}'=FINISHED --timeout=2h
+   kubectl -n paystream delete flinkdeployment/device-history-bootstrap
+   for f in deploy/k8s/flink/{payments-job,ledger-cdc-job}.yaml; do render "$f" | kubectl apply -f -; done
    ```
    A later image change is just a new `spec.image`: the operator takes a savepoint, stops the job,
    and starts the new version from it.

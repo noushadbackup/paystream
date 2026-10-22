@@ -87,4 +87,7 @@ spec:
       - "true"
     parallelism: 16
     upgradeMode: savepoint
+    # first deployment only: device history written by device-history-bootstrap.yaml (ADR 13);
+    # later upgrades restore from the job's own savepoints
+    initialSavepointPath: s3://CHECKPOINT_BUCKET/bootstrap/device-history
     state: running

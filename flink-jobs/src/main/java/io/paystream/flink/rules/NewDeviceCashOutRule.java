@@ -2,6 +2,7 @@ package io.paystream.flink.rules;
 
 import io.paystream.flink.model.Alert;
 import io.paystream.flink.model.Payment;
+import java.time.Duration;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
@@ -11,9 +12,13 @@ import org.apache.flink.util.Collector;
 /**
  * Keyed by sender: a large cash-out from a device the account has not used before (account takeover
  * after SIM swap or OTP phishing). Accounts with no device history are learned silently first, so a
- * cold start does not flag every account.
+ * cold start does not flag every account. That learning needs history the job may not have (a new
+ * deployment, a state reset): {@code DeviceHistoryBootstrap} writes it from the lakehouse into a
+ * savepoint the job starts from.
  */
 public class NewDeviceCashOutRule extends FraudRule {
+    public static final String UID = "rule-new-device";
+    static final Duration HISTORY_TTL = Duration.ofDays(90);
     private transient MapState<String, Long> devices;
 
     public NewDeviceCashOutRule(RuleConfig cfg) {
@@ -23,9 +28,14 @@ public class NewDeviceCashOutRule extends FraudRule {
     @Override
     public void open(OpenContext ctx) throws Exception {
         super.open(ctx);
+        devices = getRuntimeContext().getMapState(historyDescriptor());
+    }
+
+    /** Device -> first seen (event time) for the keyed account; shared with the bootstrap. */
+    public static MapStateDescriptor<String, Long> historyDescriptor() {
         var desc = new MapStateDescriptor<>("deviceFirstSeen", String.class, Long.class);
-        desc.enableTimeToLive(StateTtlConfig.newBuilder(java.time.Duration.ofDays(90)).build());
-        devices = getRuntimeContext().getMapState(desc);
+        desc.enableTimeToLive(StateTtlConfig.newBuilder(HISTORY_TTL).build());
+        return desc;
     }
 
     @Override

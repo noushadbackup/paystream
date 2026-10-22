@@ -116,7 +116,7 @@ public final class PaymentsPipeline {
         DataStream<Alert> newDevice = success
                 .filter(p -> p.senderId.startsWith("U")).name("user-initiated").uid("user-initiated")
                 .keyBy(p -> p.senderId)
-                .process(new NewDeviceCashOutRule(rules)).name("rule-new-device").uid("rule-new-device");
+                .process(new NewDeviceCashOutRule(rules)).name("rule-new-device").uid(NewDeviceCashOutRule.UID);
 
         DataStream<Alert> mule = success
                 .filter(p -> "P2P".equals(p.txnType)).name("p2p").uid("p2p")
