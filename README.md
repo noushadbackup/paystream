@@ -68,6 +68,7 @@ flowchart TB
 | Regulatory reporting | Cash Transaction Reports and an STR worklist built in dbt per customer and Dhaka business day; structuring, pass-through and fan-in typologies; thresholds as config; dbt unit tests pin each rule; shareable extracts use salted pseudonyms | [`dbt/models/aml`](dbt/models/aml), [ADR 11](docs/adr/0011-aml-reporting-in-the-lakehouse.md) |
 | Running it for real | Kubernetes with operators: Strimzi Kafka (KRaft, TLS + SCRAM, an ACL per service), Flink jobs upgraded through savepoints with HA and autoscaling, a Helm chart for the services with default-deny network policies; Terraform for AWS (EKS over three zones, S3 under KMS, RDS, ElastiCache with TLS, an IAM role per service account). Schema-checked and validated in CI | [`deploy/`](deploy/README.md), [ADR 12](docs/adr/0012-production-on-kubernetes-with-operators.md) |
 | Measured at scale | The production job replayed over 7.2M payments from 5M accounts: 4,334 events/s on 4 vCPU with RocksDB and exactly-once checkpoints, bronze and silver equal to the input, every fraud scenario caught except 11 of 59 takeovers, 83% precision. Each run found a real defect, fixed in the code | [BENCHMARKS.md](BENCHMARKS.md#replay-benchmark), [`replay.sh`](benchmarks/replay.sh) |
+| Real-time on a real cluster | Kafka and a Flink cluster for an hour at 2,000 payments/s: consumer lag 0 throughout, alerts p95 226 ms / p99 477 ms from arrival in Kafka, silver queryable within 12 s, bronze and silver exact; two `kill -9`s of the TaskManager mid-stream recovered in under a minute with no lost or duplicated rows | [BENCHMARKS.md](BENCHMARKS.md#live-stack-benchmark), [`stack/run.sh`](benchmarks/stack/run.sh) |
 | Day-one detection after a cold start | Rules that need 90 days of memory start from a savepoint built from the lakehouse with the State Processor API, so a new deployment does not miss takeovers | [`DeviceHistoryBootstrap`](flink-jobs/src/main/java/io/paystream/flink/bootstrap/DeviceHistoryBootstrap.java), [ADR 13](docs/adr/0013-warm-start-from-the-lakehouse.md) |
 | Events arriving out of order across partitions | Analyst rules check each arrival against every window it falls in, so a pattern is found whatever order its events arrive in; pinned in both engines by a conformance vector | [`DynamicRuleEvaluator`](flink-jobs/src/main/java/io/paystream/flink/rules/dynamic/DynamicRuleEvaluator.java), [vector 07](rules/conformance/07_out_of_order.json) |
 | Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
@@ -155,7 +156,12 @@ ran on. So far:
   The five runs that led there each exposed a defect (state layout, simulator realism, cold start,
   a false-alarm-prone statistic, out-of-order arrival), all fixed.
 * **Decision API**: 1,000 decisions/s with client p50 1.8 ms and p99 48 ms, no errors.
-* **Full stack with Kafka** (`make bench`): not run yet.
+* **Live stack** (Kafka and a Flink cluster, no Docker, same 4-vCPU box): an hour at 2,010 payments/s
+  with consumer lag 0 throughout, fraud alerts p95 226 ms and p99 477 ms from arrival in Kafka, silver
+  queryable within 12 s (p95), and bronze and silver exact. With the TaskManager killed twice
+  mid-stream the job caught up within a minute each time, with no lost or duplicated rows. The first
+  hour-long run exposed RocksDB memory growth under glibc malloc, fixed with jemalloc.
+* **Docker Compose stack** (`make bench`): not run yet.
 
 ## Layout
 
@@ -174,7 +180,7 @@ dbt/           staging + gold models on Trino; DuckDB target for CI
 airflow/       nightly build and backfill DAGs
 dashboard/     Fraud Ops Console (Streamlit), same SQL on Trino and DuckDB
 monitoring/    Prometheus scrape config, Grafana dashboard
-benchmarks/    full-stack run (run_benchmark.sh, measure.py), replay benchmark (replay.sh), results/
+benchmarks/    full-stack run (run_benchmark.sh, measure.py), live stack (stack/run.sh), replay (replay.sh), results/
 deploy/        Terraform (AWS), Strimzi and Flink operator manifests, Helm chart
 docs/          design doc and ADRs
 ```

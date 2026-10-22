@@ -128,6 +128,19 @@ def read_topic(bootstrap: str, topic: str, schema: Path, fields: list[str]) -> l
     return out
 
 
+def recovery(samples: list[dict], chaos: list[dict]) -> list[dict]:
+    """Per TaskManager kill: seconds until the Kafka backlog that built up while the job was down was
+    consumed again (the source's pendingRecords back to 0), to the 5 s sampling interval."""
+    out = []
+    for c in chaos:
+        after = [s for s in samples if s["t"] >= c["at"] and s.get("pending") is not None]
+        backlog = next((i for i, s in enumerate(after) if s["pending"] > 0), None)
+        caught = next((s for s in after[backlog:] if s["pending"] == 0), None) if backlog is not None else None
+        out.append({**c, "peak_backlog": max((s["pending"] for s in after[:60]), default=None),
+                    "backlog_cleared_after_s": round(caught["t"] - c["at"]) if caught else None})
+    return out
+
+
 def final(a) -> None:
     run = Path(a.run)
     samples = [json.loads(x) for x in (run / "samples.jsonl").read_text().splitlines()]
@@ -180,7 +193,7 @@ def final(a) -> None:
                   "state_backend": "rocksdb, incremental checkpoints every 10 s, exactly-once",
                   "lakehouse": "Iceberg, Hadoop catalog on local disk", "online_store": "Redis",
                   "partitions": a.partitions, "parallelism": a.parallelism, "users": a.users,
-                  "target_rate": a.rate, "duration_s": a.duration, "chaos": chaos,
+                  "target_rate": a.rate, "duration_s": a.duration, "chaos": recovery(samples, chaos),
                   "bootstrap_seconds": int((run / "bootstrap_seconds").read_text())
                   if (run / "bootstrap_seconds").exists() else None,
                   "python": platform.python_version()},

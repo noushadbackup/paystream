@@ -1,0 +1,188 @@
+{
+  "kind": "stack",
+  "note": "chaos: 2,000/s for 20 min, TaskManager kill -9 at minutes 6:40 and 13:20, jemalloc",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "vcpus": 4,
+    "ram_gb": 15.7,
+    "os": "Linux-6.18.44-fc-v140-x86_64-with-glibc2.39"
+  },
+  "setup": {
+    "kafka": "3.8.1, one broker (KRaft)",
+    "flink": "1.20.1 standalone, 1 JobManager + 1 TaskManager",
+    "state_backend": "rocksdb, incremental checkpoints every 10 s, exactly-once",
+    "lakehouse": "Iceberg, Hadoop catalog on local disk",
+    "online_store": "Redis",
+    "partitions": 8,
+    "parallelism": 4,
+    "users": 5000000,
+    "target_rate": 2000,
+    "duration_s": 1200,
+    "chaos": [
+      {
+        "event": "kill_taskmanager",
+        "at": 1792646017,
+        "peak_backlog": 17331.0,
+        "backlog_cleared_after_s": 48
+      },
+      {
+        "event": "kill_taskmanager",
+        "at": 1792646430,
+        "peak_backlog": 6615.0,
+        "backlog_cleared_after_s": 57
+      }
+    ],
+    "bootstrap_seconds": 188,
+    "python": "3.13.16"
+  },
+  "throughput": {
+    "produced_events": 2412034,
+    "produced_per_s": 2008,
+    "tail_events_after_duration": 1967,
+    "flink_source_per_s_mean": 1974.8,
+    "flink_source_per_s_max": 2945.9
+  },
+  "consumer_lag_records": {
+    "p50": 0.0,
+    "p95": 0.0,
+    "max": 17331.0
+  },
+  "alert_latency_ms": {
+    "alerts": 113,
+    "p50": 130,
+    "p95": 20444,
+    "p99": 27466,
+    "max": 29283
+  },
+  "by_10_minutes": [
+    {
+      "minutes": "0-10",
+      "alerts": 48,
+      "alert_latency_p95_ms": 24493,
+      "checkpoint_ms_max": 5974
+    },
+    {
+      "minutes": "10-20",
+      "alerts": 60,
+      "alert_latency_p95_ms": 20444,
+      "checkpoint_ms_max": 6493
+    },
+    {
+      "minutes": "20-30",
+      "alerts": 5,
+      "alert_latency_p95_ms": 129,
+      "checkpoint_ms_max": 898
+    }
+  ],
+  "silver_freshness_ms": {
+    "commits": 134,
+    "p50_ms": 11201,
+    "p95_ms": 11865,
+    "max_ms": 45325,
+    "definition": "per commit: commit time minus the earliest ingest_time among the rows it made visible"
+  },
+  "checkpoints": {
+    "completed": 143,
+    "failed": 6,
+    "duration_ms_p50": 921,
+    "duration_ms_max": 6493,
+    "state_bytes_last": 674005357
+  },
+  "restarts": 4.0,
+  "exactly_once": {
+    "kafka_records": 2412034,
+    "bronze_rows": 2412034,
+    "bronze_equals_kafka": true,
+    "distinct_txn_in_kafka": 2400061,
+    "silver_rows": 2400061,
+    "silver_equals_distinct": true
+  },
+  "quality": {
+    "recall": {
+      "velocity_burst": {
+        "incidents": 38,
+        "detected": 38,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 38,
+        "detected": 31,
+        "recall": 0.8158
+      },
+      "mule_ring": {
+        "incidents": 6,
+        "detected": 6,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 3,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "pin_brute_force": {
+        "incidents": 14,
+        "detected": 14,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 6,
+        "detected": 4,
+        "recall": 0.6667
+      },
+      "structuring": {
+        "incidents": 1,
+        "detected": 0,
+        "recall": 0.0
+      }
+    },
+    "alerts": 113,
+    "alerts_per_rule": {
+      "MULE_FAN_IN": 6,
+      "NEW_DEVICE_CASH_OUT": 46,
+      "VELOCITY": 43,
+      "device-farm": 4,
+      "failed-pin-burst": 14
+    },
+    "shadow_alerts": 0,
+    "precision": 0.8496,
+    "precision_same_scenario": 0.823,
+    "warmup_minutes": 5,
+    "recall_scored": {
+      "velocity_burst": {
+        "incidents": 29,
+        "detected": 29,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 32,
+        "detected": 27,
+        "recall": 0.8438
+      },
+      "mule_ring": {
+        "incidents": 5,
+        "detected": 5,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 2,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "pin_brute_force": {
+        "incidents": 10,
+        "detected": 10,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 2,
+        "detected": 2,
+        "recall": 1.0
+      },
+      "structuring": {
+        "incidents": 0,
+        "detected": 0,
+        "recall": null
+      }
+    }
+  }
+}
