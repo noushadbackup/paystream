@@ -8,8 +8,9 @@ x-s3-env: &s3-env
 
 x-flink-conf: &flink-conf |
   jobmanager.rpc.address: jobmanager
-  # 4 slots for the payments job + 4 for the ledger CDC job (both run at parallelism 4).
-  taskmanager.numberOfTaskSlots: 8
+  # 4 slots for the payments job + 1 for the ledger CDC job (submitted with -p 1). Managed memory is
+  # split per slot, so the payments job gets 4/5 of it.
+  taskmanager.numberOfTaskSlots: 5
   parallelism.default: 4
   state.backend.type: rocksdb
   state.backend.incremental: true
@@ -17,6 +18,12 @@ x-flink-conf: &flink-conf |
   # Docker Desktop's virtual disk every fsync costs ~12 ms and each incremental checkpoint flushes
   # and syncs hundreds of small SST files, which stalled the job at 1,000 events/s.
   state.backend.rocksdb.localdir: /tmp/rocksdb
+  # With little RocksDB memory, memtables are tiny and one compaction thread saturates, so writes
+  # stall and operators block in put. More background threads, dynamic level sizing and timers on
+  # the heap (one timer per account flush) keep it moving.
+  state.backend.rocksdb.thread.num: 4
+  state.backend.rocksdb.compaction.level.use-dynamic-size: true
+  state.backend.rocksdb.timer-service.factory: HEAP
   execution.checkpointing.dir: s3://checkpoints/flink
   execution.checkpointing.savepoint-dir: s3://checkpoints/savepoints
   s3.endpoint: http://minio:9000
@@ -28,7 +35,9 @@ x-flink-conf: &flink-conf |
   metrics.reporter.prom.port: 9249
   metrics.latency.interval: 0
   jobmanager.memory.process.size: 1600m
-  taskmanager.memory.process.size: 4096m
+  # As much as fits in a 12 GB Docker Desktop VM with ~1.5 GB to spare; managed (RocksDB) is ~40%.
+  taskmanager.memory.process.size: 5120m
+  taskmanager.memory.managed.size: 2048m
 
 services:
   kafka:
@@ -188,7 +197,8 @@ services:
     image: trinodb/trino:463
     ports: ["8080:8080"]
     depends_on: [iceberg-rest]
-    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
+    # Trino sizes its heap at 80% of the RAM it sees, i.e. of the whole Docker VM: cap it at 1 GB.
+    volumes: ["./trino/catalog:/etc/trino/catalog:ro", "./trino/jvm.config:/etc/trino/jvm.config:ro"]
 
   prometheus:
     image: prom/prometheus:v2.55.0
