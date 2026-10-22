@@ -168,7 +168,7 @@ def main() -> None:
         deadline = time.time() + a.duration
         while time.time() < deadline:
             rate.append(prom(a.prometheus, 'sum(flink_taskmanager_job_task_operator_numRecordsOutPerSecond'
-                                           '{operator_name=~"Source: kafka-payments.*"})') or 0.0)
+                                           '{operator_name=~"Source:_kafka_payments.*"})') or 0.0)
             lag.append(prom(a.prometheus, 'sum(kafka_consumergroup_lag{consumergroup="paystream-flink"})') or 0.0)
             newest = trino_rows(a.trino, "SELECT to_unixtime(max(ingest_time)) FROM lake.silver.payments")[0][0]
             if newest:

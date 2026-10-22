@@ -8,10 +8,15 @@ x-s3-env: &s3-env
 
 x-flink-conf: &flink-conf |
   jobmanager.rpc.address: jobmanager
-  taskmanager.numberOfTaskSlots: 4
+  # 4 slots for the payments job + 4 for the ledger CDC job (both run at parallelism 4).
+  taskmanager.numberOfTaskSlots: 8
   parallelism.default: 4
   state.backend.type: rocksdb
   state.backend.incremental: true
+  # RocksDB's working dir is scratch (durability is the checkpoint in S3), so keep it on tmpfs: on
+  # Docker Desktop's virtual disk every fsync costs ~12 ms and each incremental checkpoint flushes
+  # and syncs hundreds of small SST files, which stalled the job at 1,000 events/s.
+  state.backend.rocksdb.localdir: /tmp/rocksdb
   execution.checkpointing.dir: s3://checkpoints/flink
   execution.checkpointing.savepoint-dir: s3://checkpoints/savepoints
   s3.endpoint: http://minio:9000
@@ -118,7 +123,9 @@ services:
     restart: "no"
 
   minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    # MinIO stopped publishing images (Docker Hub repo gone, quay.io needs auth); pgsty builds the
+    # same upstream source with the same entrypoint, so the command and healthcheck are unchanged.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     ports: ["9000:9000", "9001:9001"]
     command: server /data --console-address :9001
     environment:
@@ -131,7 +138,7 @@ services:
       retries: 12
 
   minio-init:
-    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    image: pgsty/mc:RELEASE.2026-10-18T00-00-00Z
     depends_on: { minio: { condition: service_healthy } }
     entrypoint: >
       sh -c "mc alias set local http://minio:9000 minio minio12345 &&
@@ -148,10 +155,12 @@ services:
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
-      CATALOG_URI: jdbc:sqlite:file:/catalog/iceberg.db
+      # The image runs as uid 1000 and has no /catalog dir, so a volume mounted there is root-owned and
+      # SQLite cannot create the file. /home/iceberg exists and is owned by that user.
+      CATALOG_URI: jdbc:sqlite:file:/home/iceberg/iceberg.db
       CATALOG_JDBC_USER: user
       CATALOG_JDBC_PASSWORD: password
-    volumes: ["catalog-data:/catalog"]
+    volumes: ["catalog-data:/home/iceberg"]
 
   jobmanager:
     build: { context: ., dockerfile: flink-jobs/Dockerfile }
@@ -169,6 +178,7 @@ services:
     image: paystream/flink:local
     command: taskmanager
     depends_on: [jobmanager]
+    tmpfs: ["/tmp/rocksdb:size=3g,mode=1777"]
     environment:
       <<: *s3-env
       FLINK_PROPERTIES: *flink-conf
