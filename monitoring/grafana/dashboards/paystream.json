@@ -31,7 +31,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=~\"Source: kafka-payments.*\"})",
+          "expr": "sum(flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=~\"Source:_kafka_payments.*\"})",
           "legendFormat": "Events in per second"
         }
       ]
@@ -255,7 +255,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(time() * 1000) - min(flink_taskmanager_job_task_operator_currentOutputWatermark{operator_name=\"split-valid\"} > 0)",
+          "expr": "(time() * 1000) - min(flink_taskmanager_job_task_operator_currentOutputWatermark{operator_name=\"split_valid\"} > 0)",
           "legendFormat": "Watermark lag (event time behind wall clock)"
         }
       ]

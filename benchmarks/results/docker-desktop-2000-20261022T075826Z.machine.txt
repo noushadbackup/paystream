@@ -1,0 +1,3 @@
+MINGW64_NT-10.0-26200 x86_64
+16
+docker: 16 CPUs, 12541165568 bytes memory, Docker Desktop
