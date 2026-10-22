@@ -32,3 +32,12 @@ fi
 
 python benchmarks/measure.py --duration "$DURATION" --out "$RUN_DIR/$STAMP.json"
 echo "== report: $RUN_DIR/$STAMP.json"
+
+# The exactly-once count in that report is taken while the generator is still delivering late events
+# (1% arrive up to 30 minutes after they happened), so Kafka is always a little ahead of bronze there.
+# The real check runs once the generator has exited and two checkpoints have committed the tail.
+echo "== waiting for late events to drain (generator exits up to 30 min after the run)"
+docker wait paystream-load >/dev/null 2>&1 || true
+sleep 30
+python benchmarks/measure.py --verify-only --out "$RUN_DIR/$STAMP.verify.json"
+echo "== verify: $RUN_DIR/$STAMP.verify.json"
