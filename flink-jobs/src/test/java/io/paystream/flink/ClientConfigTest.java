@@ -36,6 +36,6 @@ class ClientConfigTest {
     void hadoopCatalogNeedsOnlyAWarehouse() {
         assertThat(ClientConfig.lakehouse(ParameterTool.fromArgs(new String[] {
             "--catalogType", "hadoop", "--warehouse", "file:///data/warehouse"})))
-                .containsExactlyEntriesOf(Map.of("catalog-type", "hadoop", "warehouse", "file:///data/warehouse"));
+                .containsExactlyInAnyOrderEntriesOf(Map.of("catalog-type", "hadoop", "warehouse", "file:///data/warehouse"));
     }
 }
