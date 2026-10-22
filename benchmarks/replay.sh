@@ -33,8 +33,9 @@ fi
 if [[ "$HISTORY_HOURS" -gt 0 && ! -s "$DATA/history.jsonl" ]]; then
   echo "== generating $HISTORY_HOURS h of earlier traffic"
   HSTART=$(python -c "from datetime import datetime, timedelta; print((datetime.fromisoformat('$START') - timedelta(hours=$HISTORY_HOURS)).isoformat())")
-  paystream-gen "${GEN[@]}" --duration $((HISTORY_HOURS * 3600)) --seed $((SEED + 1)) --start "$HSTART" \
-    --out "$DATA/history.jsonl"
+  # the same customers (population seed) as the replay, with different traffic (seed)
+  paystream-gen "${GEN[@]}" --duration $((HISTORY_HOURS * 3600)) --seed $((SEED + 1)) --population-seed "$SEED" \
+    --start "$HSTART" --out "$DATA/history.jsonl"
 fi
 
 echo "== building"

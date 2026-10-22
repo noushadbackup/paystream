@@ -49,10 +49,11 @@ job got 686 MB of RocksDB memory and stalled ([below](#live-stack-benchmark)); t
 (RocksDB background threads, dynamic level sizing, heap timers; a 5,120 MB TaskManager with 5 slots
 and the ledger job at parallelism 1, so the payments job gets about 1,640 MB; Trino's heap capped
 at 1 GB) holds 2,000/s with checkpoints around 1 s. Exactly-once is checked after the generator's
-late events (up to 30 minutes) have drained. Precision is low in these runs because 1 million users
-at 2,000/s is 173 payments per user per day, so busy simulated accounts trip the fixed velocity
-threshold; with 5 million users at the same rate (live stack, replay) it is 82 to 83%. A velocity
-threshold relative to each account's own rate would fix it at any ratio.
+late events (up to 30 minutes) have drained. Precision was low in these runs because 1 million users
+at 2,000/s is 173 payments per user per day, so busy simulated accounts tripped the then fixed
+velocity threshold. The velocity rule now compares each account with its own rate, learned from the
+lakehouse before the job starts: replayed over the same 2.4M events, precision went from 3.3% to 72%
+with every velocity burst and takeover still caught ([runs 6 to 8](#what-the-runs-found)).
 
 ## Live stack benchmark
 
@@ -216,6 +217,9 @@ something the unit tests had not.
 | [3](benchmarks/results/replay-20261021T224458Z.json) | generator activity cap; 5M users; device history bootstrapped | 7,239,318 | 4,168/s | 633 | 52.9% | 48 / 59 | 0 / 1 |
 | [4](benchmarks/results/replay-20261021T232835Z.json) | agent spike rule on the exact Poisson tail | 7,239,318 | 4,411/s | 403 | 83.1% | 48 / 59 | 0 / 1 |
 | [5](benchmarks/results/replay-20261022T003309Z.json) | analyst rules independent of arrival order | 7,239,318 | 4,334/s | 401 | 83.3% | 48 / 59 | 1 / 1 |
+| [6](benchmarks/results/replay-20261022T113349Z.json) | the desktop run's data: 1M users, 2,000/s, 20 min, no history | 2,414,338 | 6,583/s | 2,740 | 3.3% | 0 / 46 | 0 / 2 |
+| [7](benchmarks/results/replay-20261022T114150Z.json) | velocity relative to each account's own rate | 2,414,338 | 6,729/s | 817 | 10.8% | 0 / 46 | 0 / 2 |
+| [8](benchmarks/results/replay-20261022T121304Z.json) | those rates and devices bootstrapped from 2 h of history | 2,414,338 | 6,020/s | 189 | 72.5% | 46 / 46 | 0 / 2 |
 
 1. **State layout decided throughput.** On RocksDB every state access is a serialised lookup.
    `OnlineFeatures` kept four separate states per account (minute buckets, hour buckets, a clock and
@@ -239,6 +243,24 @@ something the unit tests had not.
    It only showed at parallelism 2 or more. Each arrival is now checked against every window it
    falls in, in Flink and in the Python backtester, with
    [conformance vector 07](rules/conformance/07_out_of_order.json) pinning both.
+6. **One threshold does not fit every account.** Run 6 replays the events of the desktop run, where
+   precision was 3%, and gets the same: 2,696 of 2,740 alerts are `VELOCITY` on busy legitimate
+   accounts. With 1M users at 2,000/s the busiest accounts send two or three transfers a minute, so
+   six in a minute is chance, not a drain. The rule now keeps a decayed count of each account's
+   earlier transfers (a Gamma prior worth ten minutes of an ordinary account) and alerts when the
+   count in the window has a negative binomial tail below 1e-5, and is at least six; a window that
+   alerted stays out of the history so a drain does not raise the bar for the next one. Run 7: once
+   rates are learned, false velocity alerts fell from about 130 to under 10 a minute (precision 36%
+   over the last 10 minutes), every burst still caught, throughput unchanged. Most of what remained
+   came from the first minutes, before busy accounts had a rate.
+7. **So start the rule warm.** `DeviceHistoryBootstrap` now writes each account's outgoing rate (the
+   last 6 hours from the lakehouse) into the savepoint beside its devices. Run 8: 78 velocity alerts
+   instead of 2,696, precision 72.5%, all 42 bursts and all 46 takeovers caught. The first attempt
+   was worse than none (2,509 velocity alerts): the history file had been generated for different
+   customers than the live traffic (the generator seeded both from the traffic seed), so confident
+   low rates sat on accounts that are busy. The generator now takes `--population-seed`, and the
+   replay keeps it fixed between history and live traffic. The agent spike rule (0 of 3) still learns
+   from scratch with its 20-minute warm-up; bootstrapping it the same way is the next step.
 
 Runs vary slightly between repeats (late-row counts and a few alerts) because arrival into the
 parallel operators is not deterministic.

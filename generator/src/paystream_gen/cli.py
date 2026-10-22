@@ -43,13 +43,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--p-duplicate", type=float, default=0.005)
     p.add_argument("--schema-version", type=int, choices=[1, 2], default=2)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--population-seed", type=int,
+                   help="seed for who the users are and how active (default --seed); keep it fixed to generate "
+                        "history and live traffic for the same customers with different --seed")
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     a = parse_args(argv)
     start_ms = int(datetime.fromisoformat(a.start).timestamp() * 1000) if a.start else int(time.time() * 1000)
-    pop = Population.build(a.users, a.merchants, a.agents, seed=a.seed)
+    pop_seed = a.seed if a.population_seed is None else a.population_seed
+    pop = Population.build(a.users, a.merchants, a.agents, seed=pop_seed)
     cfg = Config(rate_per_s=a.rate, diurnal=a.diurnal, p_late=a.p_late, p_duplicate=a.p_duplicate,
                  fraud_scale=a.fraud_scale, schema_version=a.schema_version)
     sim = Simulator(pop, cfg, seed=a.seed)
