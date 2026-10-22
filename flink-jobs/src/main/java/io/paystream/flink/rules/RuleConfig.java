@@ -6,9 +6,16 @@ import org.apache.flink.api.java.utils.ParameterTool;
 
 /** Fraud rule thresholds. Every value can be overridden with a job argument of the same name. */
 public class RuleConfig implements Serializable {
-    /** Outgoing transfers from one account within {@code velocityWindow} that raise an alert. */
+    /** Outgoing transfers from one account within {@code velocityWindow}: never alert below this count. */
     public int velocityMaxTxns = 6;
     public Duration velocityWindow = Duration.ofSeconds(60);
+    /** Alert when a count this high, given the account's own history, has probability below this. */
+    public double velocityAlpha = 1e-5;
+    /** Prior for an account with no history: this many outgoing transfers a minute, worth this many minutes. */
+    public double velocityPriorPerMin = 0.1;
+    public double velocityPriorMinutes = 10;
+    /** Time constant of the account's history: older transfers weigh less. */
+    public Duration velocityHistory = Duration.ofMinutes(60);
 
     /** Distinct P2P senders into one account within {@code muleWindow}. */
     public int muleMinSenders = 8;
@@ -32,6 +39,10 @@ public class RuleConfig implements Serializable {
         RuleConfig c = new RuleConfig();
         c.velocityMaxTxns = params.getInt("velocityMaxTxns", c.velocityMaxTxns);
         c.velocityWindow = Duration.ofSeconds(params.getLong("velocityWindowSec", c.velocityWindow.toSeconds()));
+        c.velocityAlpha = params.getDouble("velocityAlpha", c.velocityAlpha);
+        c.velocityPriorPerMin = params.getDouble("velocityPriorPerMin", c.velocityPriorPerMin);
+        c.velocityPriorMinutes = params.getDouble("velocityPriorMinutes", c.velocityPriorMinutes);
+        c.velocityHistory = Duration.ofSeconds(params.getLong("velocityHistorySec", c.velocityHistory.toSeconds()));
         c.muleMinSenders = params.getInt("muleMinSenders", c.muleMinSenders);
         c.muleWindow = Duration.ofSeconds(params.getLong("muleWindowSec", c.muleWindow.toSeconds()));
         c.newDeviceMinPaisa = params.getLong("newDeviceMinPaisa", c.newDeviceMinPaisa);

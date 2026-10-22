@@ -61,12 +61,56 @@ class FraudRulesTest {
     }
 
     @Test
-    void velocityStateIsCleanedAfterTheWindow() throws Exception {
+    void velocityKeepsOnlyTheBaselineAfterTheWindow() throws Exception {
         try (var h = new RuleHarness(new VelocityRule(cfg), p -> p.senderId)) {
             h.send(pay(T0, "P2P", "U1", "U2", 100, "D1"));
             h.watermark(T0 + 2 * MIN);
-            assertThat(h.stateKeys()).isZero();
+            assertThat(h.stateKeys()).isOne(); // the transfer times are gone; the account's rate stays (with a TTL)
         }
+    }
+
+    /** Sends a steady random stream from one account, the watermark 10 s behind; returns the last event time. */
+    private long busyAccount(RuleHarness h, String account, double perMin, long from, long to) throws Exception {
+        var rng = new java.util.Random(7);
+        long t = from;
+        while (true) {
+            t += (long) (-Math.log(1 - rng.nextDouble()) * MIN / perMin);
+            if (t >= to) return t;
+            h.send(pay(t, "P2P", account, "U" + rng.nextInt(1000), 500, "D1"));
+            h.watermark(t - 10 * S);
+        }
+    }
+
+    @Test
+    void velocityLearnsABusyAccountsOwnRate() throws Exception {
+        try (var h = new RuleHarness(new VelocityRule(cfg), p -> p.senderId)) {
+            busyAccount(h, "U1", 2.5, T0, T0 + 120 * MIN);
+            // a fixed bar of six a minute alerts on this account eight times in these two hours
+            assertThat(h.alerts()).hasSizeLessThanOrEqualTo(1);
+            assertThat(h.alerts()).allSatisfy(a -> assertThat(a.eventTime).isLessThan(T0 + 15 * MIN));
+        }
+    }
+
+    @Test
+    void velocityStillCatchesADrainOnABusyAccount() throws Exception {
+        try (var h = new RuleHarness(new VelocityRule(cfg), p -> p.senderId)) {
+            long t = busyAccount(h, "U1", 2.5, T0, T0 + 60 * MIN);
+            int before = h.alerts().size();
+            for (int i = 0; i < 14; i++) h.send(pay(t + i * 2 * S, "P2P", "U1", "U" + (500 + i), 3000, "D1"));
+            assertThat(h.alerts()).hasSize(before + 1);
+            assertThat(h.alerts().get(before).details).contains("vs usual");
+        }
+    }
+
+    @Test
+    void negativeBinomialTailMatchesKnownCases() {
+        // r = 1 is geometric: P(X >= k) = (1 - p)^k
+        assertThat(VelocityRule.negativeBinomialTail(6, 1, 10.0 / 11)).isCloseTo(Math.pow(1.0 / 11, 6), within(1e-15));
+        // a very large shape is Poisson with the same mean
+        double r = 1e6, mean = 2.0;
+        assertThat(VelocityRule.negativeBinomialTail(9, r, r / (r + mean)))
+                .isCloseTo(AgentFloatSpikeRule.poissonTail(9, mean), within(1e-6));
+        assertThat(VelocityRule.negativeBinomialTail(1, 1, 0.5)).isEqualTo(1.0); // below the mean
     }
 
     @Test
