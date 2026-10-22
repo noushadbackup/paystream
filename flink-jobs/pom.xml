@@ -77,15 +77,19 @@
       <artifactId>iceberg-aws-bundle</artifactId>
       <version>${iceberg.version}</version>
     </dependency>
+    <!-- Hadoop goes in Flink's lib/, not the job jar: Flink loads org.apache.hadoop parent-first, so a
+         bundled copy is never seen and Iceberg's catalog fails on a cluster (the image copies them). -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-client-api</artifactId>
       <version>${hadoop.version}</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-client-runtime</artifactId>
       <version>${hadoop.version}</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.avro</groupId>
