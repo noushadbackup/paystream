@@ -33,5 +33,5 @@ and the stream can overlap by the topic's retention; the rule keeps the earliest
 overlap is harmless. Other rules have short memory (minutes to an hour) and warm up from the stream.
 
 With two hours of bootstrapped history, the 60-minute replay caught 48 of 59 takeovers
-([BENCHMARKS.md](../../BENCHMARKS.md)). A two-hour window is far shorter than the 90 days production
-reads, so the remaining misses say more about the benchmark's history than about the rule.
+([BENCHMARKS.md](../../BENCHMARKS.md)). Nine of the eleven misses had no payment at all in those two
+hours, so the rule rightly treated them as unknown accounts; a 90-day history would cover most of them.

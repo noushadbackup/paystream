@@ -67,8 +67,11 @@ flowchart TB
 | Closing the loop | Alerts and held payments become cases, one per account or device, prioritised with SLAs. A verdict labels every alert on the case and freezes the account or lifts its flags within the request; effects go through a transactional outbox, and Redis can be rebuilt from Postgres | [`case-service/`](case-service/src/paystream_cases/store.py), [ADR 9](docs/adr/0009-cases-close-the-loop.md) |
 | Regulatory reporting | Cash Transaction Reports and an STR worklist built in dbt per customer and Dhaka business day; structuring, pass-through and fan-in typologies; thresholds as config; dbt unit tests pin each rule; shareable extracts use salted pseudonyms | [`dbt/models/aml`](dbt/models/aml), [ADR 11](docs/adr/0011-aml-reporting-in-the-lakehouse.md) |
 | Running it for real | Kubernetes with operators: Strimzi Kafka (KRaft, TLS + SCRAM, an ACL per service), Flink jobs upgraded through savepoints with HA and autoscaling, a Helm chart for the services with default-deny network policies; Terraform for AWS (EKS over three zones, S3 under KMS, RDS, ElastiCache with TLS, an IAM role per service account). Schema-checked and validated in CI | [`deploy/`](deploy/README.md), [ADR 12](docs/adr/0012-production-on-kubernetes-with-operators.md) |
+| Measured at scale | The production job replayed over 7.2M payments from 5M accounts: 4,334 events/s on 4 vCPU with RocksDB and exactly-once checkpoints, bronze and silver equal to the input, every fraud scenario caught except 11 of 59 takeovers, 83% precision. Each run found a real defect, fixed in the code | [BENCHMARKS.md](BENCHMARKS.md#replay-benchmark), [`replay.sh`](benchmarks/replay.sh) |
+| Day-one detection after a cold start | Rules that need 90 days of memory start from a savepoint built from the lakehouse with the State Processor API, so a new deployment does not miss takeovers | [`DeviceHistoryBootstrap`](flink-jobs/src/main/java/io/paystream/flink/bootstrap/DeviceHistoryBootstrap.java), [ADR 13](docs/adr/0013-warm-start-from-the-lakehouse.md) |
+| Events arriving out of order across partitions | Analyst rules check each arrival against every window it falls in, so a pattern is found whatever order its events arrive in; pinned in both engines by a conformance vector | [`DynamicRuleEvaluator`](flink-jobs/src/main/java/io/paystream/flink/rules/dynamic/DynamicRuleEvaluator.java), [vector 07](rules/conformance/07_out_of_order.json) |
 | Rule governance | Versioned rules, backtest on lakehouse history, four-eyes approval, kill switch, hash-chained audit log | [`rules-service/`](rules-service/src/paystream_rules/store.py), [ADR 7](docs/adr/0007-analyst-rules-without-deploys.md) |
-| Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI | [`rules/conformance`](rules/conformance) |
+| Backtest = production | The Python backtester and the Flink evaluator run the same conformance vectors in CI, including out-of-order arrival | [`rules/conformance`](rules/conformance) |
 | Money correctness | Integer paisa everywhere; double-entry ledger with a deferred balance check; daily stream vs ledger reconciliation | [`ledger/`](ledger/001_schema.sql), [`recon_stream_vs_ledger`](dbt/models/marts/recon_stream_vs_ledger.sql) |
 | Reprocessing | Bronze keeps every record as received; Airflow rebuilds a day of silver from bronze, then gold | [`paystream_backfill`](airflow/dags/paystream_backfill.py) |
 | Operating it | Grafana: throughput, consumer lag, alert latency, checkpoints, watermark lag | [`monitoring/`](monitoring) |
@@ -117,7 +120,8 @@ runbook: Terraform for the cloud, Strimzi and Flink operator manifests, and a He
 * **Flink** (JUnit, Flink test harness): each rule against real keyed state, timers and watermarks;
   analyst rules hot-swapped mid-stream, versions never rolling back, history freed when a rule is
   disabled, and rules plus history surviving a restore from checkpoint;
-  dedup surviving a snapshot and restore; Avro decoding, schema evolution and DLQ routing; and an
+  dedup surviving a snapshot and restore; takeover detection from a savepoint written by the
+  State Processor API bootstrap; Avro decoding, schema evolution and DLQ routing; and an
   end-to-end run of the whole job graph into a real Iceberg catalog on local disk.
 * **Rules service** (pytest): draft, submit, approve and reject; the author cannot approve; a failed
   publish leaves nothing live; the kill switch; tampering with the audit log is detected; the HTTP API
@@ -143,14 +147,22 @@ runbook: Terraform for the cloud, Strimzi and Flink operator manifests, and a He
 ## Benchmarks
 
 See [BENCHMARKS.md](BENCHMARKS.md). Numbers are reported only from real runs, with the machine they
-ran on.
+ran on. So far:
+
+* **Replay** of the production Flink job over 7,239,318 payments from 5 million accounts on a
+  4-vCPU container: 4,334 events/s sustained, bronze and silver exactly equal to the input after
+  dedup, 83% alert precision, and every simulated incident caught except 11 of 59 account takeovers.
+  The five runs that led there each exposed a defect (state layout, simulator realism, cold start,
+  a false-alarm-prone statistic, out-of-order arrival), all fixed.
+* **Decision API**: 1,000 decisions/s with client p50 1.8 ms and p99 48 ms, no errors.
+* **Full stack with Kafka** (`make bench`): not run yet.
 
 ## Layout
 
 ```
 generator/     Python traffic simulator (Kafka, JSONL, ledger sinks)
 schemas/       Avro contracts; history/ holds earlier versions
-flink-jobs/    Java: PaymentsJob (stream core, built-in detectors, analyst-rule engine) and LedgerCdcJob
+flink-jobs/    Java: PaymentsJob (stream core, built-in detectors, analyst-rule engine), LedgerCdcJob, DeviceHistoryBootstrap
 rules/         analyst rule contract (JSON Schema), starter library, conformance vectors
 rules-service/ Python: rule lifecycle API, maker-checker, audit log, backtester
 decision-service/ Python: inline decision API, policy, decision log, load tester
@@ -162,7 +174,7 @@ dbt/           staging + gold models on Trino; DuckDB target for CI
 airflow/       nightly build and backfill DAGs
 dashboard/     Fraud Ops Console (Streamlit), same SQL on Trino and DuckDB
 monitoring/    Prometheus scrape config, Grafana dashboard
-benchmarks/    measure.py and run_benchmark.sh
+benchmarks/    full-stack run (run_benchmark.sh, measure.py), replay benchmark (replay.sh), results/
 deploy/        Terraform (AWS), Strimzi and Flink operator manifests, Helm chart
 docs/          design doc and ADRs
 ```
