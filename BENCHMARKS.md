@@ -67,6 +67,7 @@ The replay above measures the ceiling of the Flink job alone (4,334 events/s on 
 | --- | --- | --- | --- | --- | --- | --- |
 | [steady](benchmarks/results/stack-20261022T034821Z.json) | 2,010/s for 60 min, 7,238,673 events, 5M users | **0 records** | **123 / 226 / 477 / 622 ms** | 1.1 / 1.7 s at 1.56 GB state | **11.8 s** | bronze 7,238,673 == Kafka; silver 7,202,657 == distinct |
 | [chaos](benchmarks/results/stack-20261022T050237Z.json) | 2,008/s for 20 min, TaskManager `kill -9` twice | 17,331 | 130 / 20,444 / 27,466 / 29,283 ms | 0.9 / 6.5 s | 11.9 s (max 45 s) | bronze 2,412,034 == Kafka; silver 2,400,061 == distinct |
+| [ceiling](benchmarks/results/stack-20261022T053621Z.json) | 3,516/s for 20 min, 4,222,245 events | 778 | 142 / 3,938 / 5,501 / 5,973 ms | 1.4 / 11.5 s | 19.4 s | bronze 4,222,245 == Kafka; silver 4,201,313 == distinct |
 | [first steady, glibc malloc](benchmarks/results/stack-20261022T015446Z.json) | 2,010/s for 60 min | 12,307 | 148 / 22,137 / 40,668 / 44,415 ms | 1.2 / 25.1 s | 40 s | held |
 
 **Steady.** For the whole hour the consumer kept up with the producer (source lag 0 at every
@@ -81,6 +82,15 @@ cleared the backlog within 48 s and 57 s of the kill (peak backlog 17,331 record
 to 2,946 events/s). Bronze still equals the topic record for record and silver still equals the
 distinct transactions: no loss and no duplicates across two crashes. Payments that arrived while
 the job was down were alerted on up to 29 s late; the p95 above is those alerts.
+
+**Ceiling.** At 3,500 events/s, with Kafka, the generator and Redis on the same four cores, the job
+still consumed everything as it arrived (lag never above 778 records, no restarts, exact counts), but
+it was at the edge: alert p95 rose from 654 ms in the first ten minutes to 4.3 s in the second as
+checkpoints stretched to 11.5 s. So this box sustains 2,000 events/s with sub-second alerts and
+absorbs 3,500 events/s with seconds of delay. Precision fell to 37% in that run because the same
+5 million accounts were each 1.75 times as active against the same absolute velocity thresholds;
+a higher rate in production comes from more accounts, so the quality numbers to quote are the
+2,000/s ones.
 
 **What the first steady run found.** With the JVM's default glibc malloc the job held p95 under
 300 ms for 48 minutes, then degraded: once state passed about 1.3 GB, checkpoints went from 1 s to

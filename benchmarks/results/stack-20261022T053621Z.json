@@ -1,0 +1,175 @@
+{
+  "kind": "stack",
+  "note": "ceiling: 3,500/s for 20 min, jemalloc. Same 5M users as the 2,000/s runs, so each account is 1.75x as active against the same absolute VELOCITY thresholds; precision here is not comparable with the 2,000/s runs",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "vcpus": 4,
+    "ram_gb": 15.7,
+    "os": "Linux-6.18.44-fc-v140-x86_64-with-glibc2.39"
+  },
+  "setup": {
+    "kafka": "3.8.1, one broker (KRaft)",
+    "flink": "1.20.1 standalone, 1 JobManager + 1 TaskManager",
+    "state_backend": "rocksdb, incremental checkpoints every 10 s, exactly-once",
+    "lakehouse": "Iceberg, Hadoop catalog on local disk",
+    "online_store": "Redis",
+    "partitions": 8,
+    "parallelism": 4,
+    "users": 5000000,
+    "target_rate": 3500,
+    "duration_s": 1200,
+    "chaos": [],
+    "bootstrap_seconds": 200,
+    "python": "3.13.16"
+  },
+  "throughput": {
+    "produced_events": 4222245,
+    "produced_per_s": 3516,
+    "tail_events_after_duration": 3458,
+    "flink_source_per_s_mean": 3513.9,
+    "flink_source_per_s_max": 3534.6
+  },
+  "consumer_lag_records": {
+    "p50": 0.0,
+    "p95": 0.0,
+    "max": 778.0
+  },
+  "alert_latency_ms": {
+    "alerts": 257,
+    "p50": 142,
+    "p95": 3938,
+    "p99": 5501,
+    "max": 5973
+  },
+  "by_10_minutes": [
+    {
+      "minutes": "0-10",
+      "alerts": 119,
+      "alert_latency_p95_ms": 654,
+      "checkpoint_ms_max": 3049
+    },
+    {
+      "minutes": "10-20",
+      "alerts": 133,
+      "alert_latency_p95_ms": 4255,
+      "checkpoint_ms_max": 11517
+    },
+    {
+      "minutes": "20-30",
+      "alerts": 5,
+      "alert_latency_p95_ms": 204,
+      "checkpoint_ms_max": 37672
+    }
+  ],
+  "silver_freshness_ms": {
+    "commits": 137,
+    "p50_ms": 11699,
+    "p95_ms": 19401,
+    "max_ms": 25169,
+    "definition": "per commit: commit time minus the earliest ingest_time among the rows it made visible"
+  },
+  "checkpoints": {
+    "completed": 145,
+    "failed": 0,
+    "duration_ms_p50": 1423,
+    "duration_ms_max": 37672,
+    "state_bytes_last": 996467662
+  },
+  "restarts": 0,
+  "exactly_once": {
+    "kafka_records": 4222245,
+    "bronze_rows": 4222245,
+    "bronze_equals_kafka": true,
+    "distinct_txn_in_kafka": 4201313,
+    "silver_rows": 4201313,
+    "silver_equals_distinct": true
+  },
+  "quality": {
+    "recall": {
+      "velocity_burst": {
+        "incidents": 39,
+        "detected": 39,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 25,
+        "detected": 22,
+        "recall": 0.88
+      },
+      "mule_ring": {
+        "incidents": 11,
+        "detected": 11,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 4,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "pin_brute_force": {
+        "incidents": 19,
+        "detected": 19,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 3,
+        "detected": 2,
+        "recall": 0.6667
+      },
+      "structuring": {
+        "incidents": 0,
+        "detected": 0,
+        "recall": null
+      }
+    },
+    "alerts": 257,
+    "alerts_per_rule": {
+      "MULE_FAN_IN": 11,
+      "NEW_DEVICE_CASH_OUT": 45,
+      "VELOCITY": 177,
+      "device-farm": 2,
+      "failed-pin-burst": 22
+    },
+    "shadow_alerts": 0,
+    "precision": 0.3696,
+    "precision_same_scenario": 0.3619,
+    "warmup_minutes": 5,
+    "recall_scored": {
+      "velocity_burst": {
+        "incidents": 30,
+        "detected": 30,
+        "recall": 1.0
+      },
+      "account_takeover": {
+        "incidents": 20,
+        "detected": 17,
+        "recall": 0.85
+      },
+      "mule_ring": {
+        "incidents": 7,
+        "detected": 7,
+        "recall": 1.0
+      },
+      "agent_float_spike": {
+        "incidents": 1,
+        "detected": 0,
+        "recall": 0.0
+      },
+      "pin_brute_force": {
+        "incidents": 14,
+        "detected": 14,
+        "recall": 1.0
+      },
+      "device_farm": {
+        "incidents": 0,
+        "detected": 0,
+        "recall": null
+      },
+      "structuring": {
+        "incidents": 0,
+        "detected": 0,
+        "recall": null
+      }
+    }
+  }
+}
