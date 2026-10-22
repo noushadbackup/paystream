@@ -101,6 +101,29 @@ fragment that memory. The rerun preloads jemalloc, which the official Flink imag
 ours) enables by default: same data, same state size, the TaskManager at about 4.5 GB when sampled
 at minutes 25 and 54, and checkpoints under 1.8 s for the whole hour. `run.sh` now preloads it too.
 
+**How much memory the job needs.** On Docker Desktop (Ryzen 7 7700, Docker limited to 12 GB) the same job
+processed only 570 to 660 events/s against a 2,000/s or 5,000/s load. Docker Compose gives the TaskManager
+4,096 MB, of which the payments job's four slots get 686 MB of RocksDB memory, against 2,500 MB here.
+Rerunning this benchmark with that budget reproduced it on this box, so the cause is memory, not
+Docker or Windows ([experiments](benchmarks/results/stack-memory-experiments-20261022.json)):
+
+| TaskManager / RocksDB memory | RocksDB options | Events/s (minutes 1 to 5) | Slowest checkpoint |
+| --- | --- | --- | --- |
+| 6,500 / 2,500 MB | defaults | 2,011, keeps up | ≤ 1.4 s |
+| 4,096 / 1,200 MB | defaults | 1,182 | 49 s |
+| 4,096 / 686 MB | defaults | 618 | 62 s |
+| 4,096 / 686 MB | bloom filters, partitioned index/filters | 684 | 66 s |
+| 4,096 / 686 MB | write-buffer ratio 0.9 | 718 | 54 s |
+| 4,096 / 686 MB | 4 background threads | 1,041 | 32 s |
+| 4,096 / 686 MB | 4 threads, dynamic level sizing, heap timers | 1,138 | 29 s |
+
+Thread dumps of the starved TaskManager showed the operator threads blocked inside RocksDB `put`
+and RocksDB's single compaction thread at 66% CPU in disk wait: with about 170 MB per slot shared
+by ten keyed operators, memtables are a few MB, every flush writes a small file, and compaction
+cannot keep up, so RocksDB stalls writes. Options that make reads cheaper do nothing; more compaction
+threads and fewer flushes help (+84% together), but the real requirement is roughly 600 MB of
+RocksDB memory per slot for 5 million accounts at 2,000 events/s on this job.
+
 Setting the cluster up also exposed a packaging bug the local tests could not: the job jar bundled
 the Hadoop client, which Flink loads parent-first, so on a real cluster the Iceberg sink failed with
 `NoClassDefFoundError`. The Hadoop client now goes into Flink's `lib/` (the Dockerfile copies it)

@@ -27,6 +27,7 @@ REDIS_PORT=${REDIS_PORT:-6379}
 TM_MEMORY=${TM_MEMORY:-6500m}
 MANAGED_MEMORY=${MANAGED_MEMORY:-2500m}
 HISTORY=${HISTORY:-}
+# FLINK_CONF_EXTRA: more lines for Flink's config.yaml, e.g. RocksDB options to compare
 # GEN_ARGS: extra generator flags, e.g. GEN_ARGS="--p-late 0" for no late events.
 PY=${PY:-python}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
@@ -125,6 +126,7 @@ state.backend.incremental: true
 execution.checkpointing.dir: file://$RUN/checkpoints
 execution.checkpointing.savepoint-dir: file://$RUN/savepoints
 restart-strategy.type: exponential-delay
+${FLINK_CONF_EXTRA:-}
 EOF
 # jemalloc for the Flink processes, as the official Flink image does: with glibc malloc, RocksDB's native
 # memory fragments well past its managed budget (first run: 8.1 GB RSS for a 6.5 GB TaskManager)

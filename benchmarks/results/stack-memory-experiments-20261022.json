@@ -1,0 +1,86 @@
+{
+  "kind": "stack-memory-experiments",
+  "note": "Why the Docker Desktop runs fell behind at 2,000/s. Same harness, data and rate as stack-20261022T034821Z (2,000 events/s, 5M users, 2 h of history bootstrapped, parallelism 4, jemalloc), with the TaskManager's memory set to what docker-compose gives the payments job, then RocksDB options changed one run at a time. Each run was stopped after 5 to 10 minutes once the trend was clear, so there is no lakehouse check; numbers are from the Flink REST samples taken every 5 s. rate = mean records/s out of the Kafka source over minutes 1 to 5; lag = source pendingRecords at minute 5; checkpoint = slowest checkpoint in the first 5 minutes. The first two rows were read from one sample per minute (their sample files were not kept); the others from every sample.",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "vcpus": 4,
+    "ram_gb": 15.7
+  },
+  "target_rate": 2000,
+  "runs": [
+    {
+      "taskmanager_mb": 6500,
+      "managed_mb": 2500,
+      "rocksdb_options": "defaults",
+      "rate": 2011,
+      "lag": 0,
+      "checkpoint_ms": "<=1395 (slowest in the first 10 min)",
+      "result": "keeps up for 60 min",
+      "file": "stack-20261022T034821Z.json"
+    },
+    {
+      "taskmanager_mb": 4096,
+      "managed_mb": 686,
+      "rocksdb_options": "defaults",
+      "rate": 618,
+      "lag": 49693,
+      "checkpoint_ms": 62268,
+      "result": "falls behind"
+    },
+    {
+      "taskmanager_mb": 4096,
+      "managed_mb": 686,
+      "rocksdb_options": "partitioned index/filters, heap timers",
+      "rate": 718,
+      "lag": 69314,
+      "checkpoint_ms": 64547,
+      "result": "falls behind"
+    },
+    {
+      "taskmanager_mb": 4096,
+      "managed_mb": 686,
+      "rocksdb_options": "bloom filters, partitioned index/filters",
+      "rate": 684,
+      "lag": 48775,
+      "checkpoint_ms": 65987,
+      "result": "falls behind"
+    },
+    {
+      "taskmanager_mb": 4096,
+      "managed_mb": 686,
+      "rocksdb_options": "write-buffer-ratio 0.9",
+      "rate": 718,
+      "lag": 81980,
+      "checkpoint_ms": 53860,
+      "result": "falls behind"
+    },
+    {
+      "taskmanager_mb": 4096,
+      "managed_mb": 686,
+      "rocksdb_options": "4 background threads",
+      "rate": 1041,
+      "lag": 61407,
+      "checkpoint_ms": 32119,
+      "result": "falls behind"
+    },
+    {
+      "taskmanager_mb": 4096,
+      "managed_mb": 686,
+      "rocksdb_options": "4 background threads, dynamic level sizing, heap timers",
+      "rate": 1138,
+      "lag": 28755,
+      "checkpoint_ms": 29114,
+      "result": "falls behind"
+    },
+    {
+      "taskmanager_mb": 4096,
+      "managed_mb": 1200,
+      "rocksdb_options": "defaults",
+      "rate": 1182,
+      "lag": 26709,
+      "checkpoint_ms": 49240,
+      "result": "falls behind"
+    }
+  ],
+  "diagnosis": "Thread dumps of the starved TaskManager showed the features operators blocked inside RocksDB put (a write stall) and RocksDB's single compaction thread at 66% CPU in disk wait. With ~170 MB of managed memory per slot shared by about ten keyed operators, memtables are a few MB, so RocksDB flushes many small files and compaction falls behind. More compaction threads help (+68%); read-side options (bloom filters, partitioned index) do not."
+}
