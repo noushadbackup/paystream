@@ -26,7 +26,7 @@ same when it is rebuilt.
 **Testing.** dbt unit tests pin each rule on hand-written rows (the Dhaka day boundary, thresholds,
 each typology firing on its pattern and not on its look-alike); a mutation of the structuring rule
 fails them. On the simulator, every structuring episode that is complete in the data must be found,
-and the typologies flag 59 of the 61 simulated mule accounts in the CI fixture.
+and the typologies flag 64 of the 69 simulated mule accounts in the CI fixture.
 
 **Personal data.** Streams and tables carry account ids, not names or national ids; columns that
 identify a customer are tagged `meta: {pii: true}` in the dbt docs. Anything meant to leave the AML

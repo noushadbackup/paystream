@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 
 import pytest
@@ -91,3 +92,27 @@ def test_new_scenarios_have_the_shape_their_rules_look_for(pop):
     assert all(n >= 4 for n in farm.values())
     cash_ins = [e.event for e in events if e.scenario == "structuring"]
     assert all(ev["txn_type"] == "CASH_IN" and ev["amount_paisa"] >= 20_000 * 100 for ev in cash_ins)
+
+
+def test_jsonl_labels_match_events(tmp_path):
+    from paystream_gen.cli import main
+
+    events, labels = tmp_path / "events.jsonl", tmp_path / "labels.jsonl"
+    main(["--rate", "200", "--duration", "600", "--users", "5000", "--merchants", "500", "--agents", "200",
+          "--fraud-scale", "5", "--start", "2026-10-01T00:00:00+00:00", "--out", str(events),
+          "--labels-out", str(labels)])
+    by_id = {e["txn_id"]: e for e in map(json.loads, events.read_text().splitlines())}
+    rows = [json.loads(x) for x in labels.read_text().splitlines()]
+    assert rows and {r["scenario"] for r in rows} >= {"velocity_burst", "mule_ring"}
+    assert all(r["txn_id"] in by_id and r["account_id"] for r in rows)
+    assert len({r["txn_id"] for r in rows}) == len(rows)  # duplicates are not labelled twice
+
+
+def test_no_personal_account_dominates():
+    from paystream_gen.population import USER_WEIGHT_CAP
+
+    p = Population.build(n_users=200_000, n_merchants=100, n_agents=50, seed=3)
+    w = [b - a for a, b in zip([0.0, *p.user_cum_weights], p.user_cum_weights, strict=False)]
+    mean = sum(w) / len(w)
+    assert max(w) <= USER_WEIGHT_CAP * (1 + 1e-9)
+    assert max(w) / mean < 25  # uncapped, the tail reaches hundreds of times the mean

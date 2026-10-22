@@ -27,15 +27,24 @@ class Sink(Protocol):
 
 
 class JsonlSink:
-    def __init__(self, path: str):
+    """Events as JSON lines in arrival order; with ``labels_path``, the ground truth the Kafka sink
+    would send to ``fraud.labels``, for replaying a run without Kafka."""
+
+    def __init__(self, path: str, labels_path: str | None = None):
         self._f = sys.stdout if path == "-" else open(path, "w")  # noqa: SIM115 - closed in close()
+        self._labels = open(labels_path, "w") if labels_path else None  # noqa: SIM115 - closed in close()
 
     def write(self, e: Emitted) -> None:
         self._f.write(json.dumps(e.event) + "\n")
+        if self._labels and e.scenario and not e.is_duplicate:
+            self._labels.write(json.dumps({"txn_id": e.event["txn_id"], "scenario": e.scenario,
+                                           "account_id": e.subject}) + "\n")
 
     def close(self) -> None:
         if self._f is not sys.stdout:
             self._f.close()
+        if self._labels:
+            self._labels.close()
 
 
 class KafkaSink:

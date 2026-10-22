@@ -23,6 +23,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--sink", choices=["kafka", "jsonl"], default="jsonl")
     p.add_argument("--out", default="-", help="jsonl output path, - for stdout")
+    p.add_argument("--labels-out", help="jsonl sink: also write fraud labels here")
     p.add_argument("--bootstrap", default="localhost:9094")
     p.add_argument("--registry", default="http://localhost:8081")
     p.add_argument("--topic", default="payments.events")
@@ -53,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     sim = Simulator(pop, cfg, seed=a.seed)
 
     sinks = [KafkaSink(a.bootstrap, a.registry, a.topic, a.labels_topic, a.schema_version)
-             if a.sink == "kafka" else JsonlSink(a.out)]
+             if a.sink == "kafka" else JsonlSink(a.out, a.labels_out)]
     if a.ledger_dsn:
         sinks.append(LedgerSink(a.ledger_dsn))
 

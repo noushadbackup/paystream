@@ -3,6 +3,11 @@
 Real MFS traffic is heavily skewed: a small share of accounts produces most
 transactions. Activity weights follow a Pareto distribution so hot keys show
 up in Kafka partitions and Flink state the way they would in production.
+
+A personal account's weight is capped at 20 times the mean (``USER_WEIGHT_CAP``): an uncapped tail
+gave one simulated user thousands of transfers an hour, which no personal account can make
+(providers cap daily transaction counts), and buried real velocity fraud under false alerts.
+Merchants are not capped; a busy merchant is a genuine hot key.
 """
 
 from __future__ import annotations
@@ -22,6 +27,9 @@ DISTRICTS: dict[str, float] = {
 
 OPERATORS = ["OP_GP", "OP_ROBI", "OP_BL", "OP_TT"]
 
+USER_PARETO_ALPHA = 1.6
+USER_WEIGHT_CAP = 20 * USER_PARETO_ALPHA / (USER_PARETO_ALPHA - 1)  # 20x the mean weight
+
 
 @dataclass(frozen=True)
 class Population:
@@ -40,7 +48,8 @@ class Population:
 
         users = [f"U{i:07d}" for i in range(n_users)]
         user_district = rng.choices(names, dweights, k=n_users)
-        user_cum = list(itertools.accumulate(rng.paretovariate(1.6) for _ in range(n_users)))
+        user_cum = list(itertools.accumulate(min(rng.paretovariate(USER_PARETO_ALPHA), USER_WEIGHT_CAP)
+                                             for _ in range(n_users)))
 
         merchants = [f"M{i:05d}" for i in range(n_merchants)]
         merchant_cum = list(itertools.accumulate(rng.paretovariate(1.2) for _ in range(n_merchants)))
